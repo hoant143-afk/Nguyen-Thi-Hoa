@@ -1,0 +1,6 @@
+{
+  "name": "Cam Race – Đại Chiến Tin Học 5",
+  "description": "Web app game show giáo dục thi đấu camera race với computer vision nhận diện thẻ màu đội, tranh quyền trả lời câu hỏi Tin học 5, tính điểm tự động và trao chứng nhận.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
