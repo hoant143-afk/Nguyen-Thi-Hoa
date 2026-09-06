@@ -1,6 +1,6 @@
 {
-  "name": "Cam Race – Đại Chiến Tin Học 5",
-  "description": "Web app game show giáo dục thi đấu camera race với computer vision nhận diện thẻ màu đội, tranh quyền trả lời câu hỏi Tin học 5, tính điểm tự động và trao chứng nhận.",
+  "name": "EDUPLAY – Hệ Thống Trò Chơi Tương Tác Lớp Học",
+  "description": "Nền tảng EdTech trò chơi tương tác đa năng dành cho lớp học: Cam Race, Quiz Battle, Vòng quay may mắn, Ai nhanh hơn, Gọi tên ngẫu nhiên, Thử thách đồng đội.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

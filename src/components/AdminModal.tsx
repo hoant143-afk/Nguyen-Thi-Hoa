@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Settings, HelpCircle, Plus, Trash2, ArrowUp, ArrowDown, Edit2, RotateCcw, X, Check, Sparkles, Volume2 } from 'lucide-react';
+import { Settings, HelpCircle, Plus, Trash2, ArrowUp, ArrowDown, Edit2, RotateCcw, X, Check, Sparkles, Volume2, Upload } from 'lucide-react';
 import { Question, GameSettings } from '../types';
 import { DEFAULT_QUESTIONS, DEFAULT_SETTINGS } from '../data/defaultQuestions';
 import { soundService } from '../services/soundService';
+import { QuestionImportModal } from './common/QuestionImportModal';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -25,6 +26,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [localQuestions, setLocalQuestions] = useState<Question[]>(questions);
   const [localSettings, setLocalSettings] = useState<GameSettings>(settings);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -133,22 +135,33 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <p className="text-xs text-slate-400">
                 Chỉnh sửa, thêm mới, sắp xếp thứ tự hoặc đánh dấu câu đặc biệt cho trận đấu:
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setShowImportModal(true);
+                  }}
+                  className="flex items-center gap-1.5 text-xs font-black text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 px-3 py-1.5 rounded-lg shadow cursor-pointer transition-all"
+                >
+                  <Upload className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>📥 Nhập từ CSV / Excel</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleResetQuestions}
-                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-amber-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800"
+                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-amber-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Khôi phục 15 câu mặc định</span>
+                  <span>Khôi phục 15 câu</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleAddQuestion}
-                  className="flex items-center gap-1.5 text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 px-3 py-1.5 rounded-lg"
+                  className="flex items-center gap-1.5 text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 px-3 py-1.5 rounded-lg cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Thêm câu hỏi mới</span>
+                  <span>+ Thêm câu hỏi</span>
                 </button>
               </div>
             </div>
@@ -506,6 +519,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* QUESTION IMPORT MODAL */}
+      <QuestionImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        currentQuestions={localQuestions}
+        onImportSuccess={(newQuestions) => {
+          setLocalQuestions(newQuestions);
+          onSaveQuestions(newQuestions);
+          setEditingIndex(null);
+        }}
+      />
     </div>
   );
 };

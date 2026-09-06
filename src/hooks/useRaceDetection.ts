@@ -248,7 +248,7 @@ export function useRaceDetection({
 
       soundService.playShutter();
       setTimeout(() => {
-        soundService.playRaceLock(winner);
+        soundService.playRaceLock(winner === 'orange' ? 'orange' : 'blue');
       }, 80);
 
       onWinnerLock(winner, snapshot, reactionTimeMs);

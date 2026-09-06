@@ -284,7 +284,7 @@ export function analyzeVideoFrame(
   let newBlueStable = isBlueTriggered ? prevBlueStable + 1 : 0;
   let newOrangeStable = isOrangeTriggered ? prevOrangeStable + 1 : 0;
 
-  let winnerCandidate: TeamId | null = null;
+  let winnerCandidate: 'blue' | 'orange' | null = null;
   const now = performance.now();
 
   const minRequiredFrames = Math.max(2, settings.minStableFrames || 3);

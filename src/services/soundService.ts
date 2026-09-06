@@ -401,6 +401,116 @@ class SoundService {
       // ignore
     }
   }
+
+  public playWheelTick() {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1200 + Math.random() * 200, ctx.currentTime);
+      gain.gain.setValueAtTime(0.15 * this.volume, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.03);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start();
+      osc.stop(ctx.currentTime + 0.04);
+    } catch {
+      // ignore
+    }
+  }
+
+  public playBuzzerHit(team: 'blue' | 'orange' | 'team1' | 'team2' | 'team3' | 'team4' = 'blue') {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      const freqs: Record<string, number> = {
+        blue: 660,
+        orange: 740,
+        team1: 660,
+        team2: 740,
+        team3: 880,
+        team4: 980,
+      };
+      const baseFreq = freqs[team] || 700;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(baseFreq, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.5, ctx.currentTime + 0.15);
+
+      gain.gain.setValueAtTime(0.3 * this.volume, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start();
+      osc.stop(ctx.currentTime + 0.25);
+    } catch {
+      // ignore
+    }
+  }
+
+  public playDrumRoll() {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      for (let i = 0; i < 15; i++) {
+        const time = ctx.currentTime + i * 0.08;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(140 + Math.random() * 40, time);
+        gain.gain.setValueAtTime((0.1 + (i / 15) * 0.2) * this.volume, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(time);
+        osc.stop(time + 0.07);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  public playPointsEarned() {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.06);
+        gain.gain.setValueAtTime(0.25 * this.volume, ctx.currentTime + idx * 0.06);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.06 + 0.2);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(ctx.currentTime + idx * 0.06);
+        osc.stop(ctx.currentTime + idx * 0.06 + 0.22);
+      });
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export const soundService = new SoundService();
