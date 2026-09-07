@@ -5,11 +5,16 @@ import { GameSession } from '../types';
 import { soundService } from '../services/soundService';
 
 interface TieScreenProps {
-  session: GameSession;
-  onRetryRace: () => void;
+  session?: GameSession;
+  onRetryRace?: () => void;
+  onRetry?: () => void;
 }
 
-export const TieScreen: React.FC<TieScreenProps> = ({ session, onRetryRace }) => {
+export const TieScreen: React.FC<TieScreenProps> = ({ session, onRetryRace, onRetry }) => {
+  const handleRetry = onRetryRace || onRetry || (() => {});
+  const blueName = session?.blueTeamName || 'Đội Xanh';
+  const orangeName = session?.orangeTeamName || 'Đội Cam';
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/95 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-2xl bg-slate-900/90 border-2 border-amber-500/60 rounded-3xl p-8 text-center space-y-6 shadow-2xl backdrop-blur-xl">
@@ -29,8 +34,8 @@ export const TieScreen: React.FC<TieScreenProps> = ({ session, onRetryRace }) =>
             HÒA – TRANH QUYỀN LẠI!
           </p>
           <p className="text-sm md:text-base text-slate-400 max-w-md mx-auto">
-            Cả hai đội <span className="text-cyan-300 font-bold">{session.blueTeamName}</span> và{' '}
-            <span className="text-amber-300 font-bold">{session.orangeTeamName}</span> đã về đích cùng lúc với chênh lệch dưới 200ms!
+            Cả hai đội <span className="text-cyan-300 font-bold">{blueName}</span> và{' '}
+            <span className="text-amber-300 font-bold">{orangeName}</span> đã về đích cùng lúc với chênh lệch dưới 200ms!
           </p>
         </div>
 
@@ -38,7 +43,7 @@ export const TieScreen: React.FC<TieScreenProps> = ({ session, onRetryRace }) =>
           <button
             onClick={() => {
               soundService.playClick();
-              onRetryRace();
+              handleRetry();
             }}
             className="w-full sm:w-auto bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-black text-lg py-4 px-8 rounded-2xl shadow-xl shadow-amber-500/30 flex items-center justify-center gap-3 mx-auto cursor-pointer transition-transform active:scale-95 uppercase tracking-wider"
           >

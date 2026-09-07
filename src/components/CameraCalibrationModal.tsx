@@ -9,7 +9,8 @@ interface CameraCalibrationModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: GameSettings;
-  onUpdateSettings: (settings: GameSettings) => void;
+  onUpdateSettings?: (settings: GameSettings) => void;
+  onSaveSettings?: (settings: GameSettings) => void;
 }
 
 export const CameraCalibrationModal: React.FC<CameraCalibrationModalProps> = ({
@@ -17,6 +18,7 @@ export const CameraCalibrationModal: React.FC<CameraCalibrationModalProps> = ({
   onClose,
   settings,
   onUpdateSettings,
+  onSaveSettings,
 }) => {
   const {
     videoRef,
@@ -118,7 +120,8 @@ export const CameraCalibrationModal: React.FC<CameraCalibrationModalProps> = ({
   };
 
   const handleSaveSettings = () => {
-    onUpdateSettings(localSettings);
+    if (onUpdateSettings) onUpdateSettings(localSettings);
+    if (onSaveSettings) onSaveSettings(localSettings);
     soundService.playClick();
     onClose();
   };

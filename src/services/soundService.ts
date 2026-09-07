@@ -511,6 +511,65 @@ class SoundService {
       // ignore
     }
   }
+
+  public playSmileChime() {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      // Cheerful sparkling chime for smile detection
+      const notes = [659.25, 830.61, 987.77, 1318.51];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.05);
+        gain.gain.setValueAtTime(0.3 * this.volume, ctx.currentTime + idx * 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.05 + 0.25);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(ctx.currentTime + idx * 0.05);
+        osc.stop(ctx.currentTime + idx * 0.05 + 0.28);
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  public playSmileWinner() {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      // Upbeat winner fanfare
+      const melody = [
+        { f: 523.25, t: 0, d: 0.12 },
+        { f: 659.25, t: 0.13, d: 0.12 },
+        { f: 783.99, t: 0.26, d: 0.15 },
+        { f: 1046.5, t: 0.42, d: 0.45 },
+      ];
+      melody.forEach(({ f, t, d }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, ctx.currentTime + t);
+        gain.gain.setValueAtTime(0.35 * this.volume, ctx.currentTime + t);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + d);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(ctx.currentTime + t);
+        osc.stop(ctx.currentTime + t + d + 0.02);
+      });
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export const soundService = new SoundService();

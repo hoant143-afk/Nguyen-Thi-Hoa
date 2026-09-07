@@ -9,7 +9,8 @@ import { soundService } from '../services/soundService';
 interface FinalResultScreenProps {
   session: GameSession;
   onOpenCertificate: () => void;
-  onRestartGame: () => void;
+  onRestartGame?: () => void;
+  onRestart?: () => void;
   onGoHome: () => void;
 }
 
@@ -17,8 +18,10 @@ export const FinalResultScreen: React.FC<FinalResultScreenProps> = ({
   session,
   onOpenCertificate,
   onRestartGame,
+  onRestart,
   onGoHome,
 }) => {
+  const handleRestart = onRestartGame || onRestart || (() => {});
   const stats: GameStats = ScoringService.calculateStats(session);
   const moments: RoundMoment[] = session.moments || [];
   const [selectedZoomMoment, setSelectedZoomMoment] = useState<RoundMoment | null>(null);
@@ -288,7 +291,7 @@ export const FinalResultScreen: React.FC<FinalResultScreenProps> = ({
           <button
             onClick={() => {
               soundService.playClick();
-              onRestartGame();
+              handleRestart();
             }}
             className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 px-6 rounded-2xl border border-slate-700 flex items-center justify-center gap-2 cursor-pointer transition-colors text-sm md:text-base"
           >

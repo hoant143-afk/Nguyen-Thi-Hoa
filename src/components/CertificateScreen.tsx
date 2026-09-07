@@ -19,6 +19,8 @@ export const CertificateScreen: React.FC<CertificateScreenProps> = ({ session, o
     className: session.className || '5A1',
     teacherName: session.teacherName || 'Thầy Hoàng',
     title: 'GIẤY CHỨNG NHẬN VÔ ĐỊCH',
+    recipientTeamName: winnerTeamName,
+    awardTitle: 'QUÁN QUÂN',
     customMessage: 'Đã xuất sắc thể hiện tốc độ, phản xạ công nghệ và kiến thức Tin học vượt trội',
     themeColor: 'gold',
     showSeal: true,

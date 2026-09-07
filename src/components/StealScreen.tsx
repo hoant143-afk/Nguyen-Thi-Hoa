@@ -11,7 +11,8 @@ interface StealScreenProps {
   stealingTeam: TeamId;
   previousWrongIndex: number;
   onStealSubmit: (selectedChoiceIndex: number) => void;
-  onProceedToNext: () => void;
+  onProceedToNext?: () => void;
+  onProceedNext?: () => void;
 }
 
 export const StealScreen: React.FC<StealScreenProps> = ({
@@ -21,7 +22,9 @@ export const StealScreen: React.FC<StealScreenProps> = ({
   previousWrongIndex,
   onStealSubmit,
   onProceedToNext,
+  onProceedNext,
 }) => {
+  const handleProceedNext = onProceedToNext || onProceedNext || (() => {});
   const currentQ = session.questions[session.currentQuestionIndex];
   const isBlue = stealingTeam === 'blue';
   const teamName = isBlue ? session.blueTeamName : session.orangeTeamName;
@@ -288,7 +291,7 @@ export const StealScreen: React.FC<StealScreenProps> = ({
               <button
                 onClick={() => {
                   soundService.playClick();
-                  onProceedToNext();
+                  handleProceedNext();
                 }}
                 className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-base md:text-lg py-3.5 px-8 rounded-2xl shadow-xl shadow-cyan-500/30 flex items-center gap-3 cursor-pointer transition-transform active:scale-95 uppercase tracking-wider"
               >

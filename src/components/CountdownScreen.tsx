@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { soundService } from '../services/soundService';
-import { GameSession } from '../types';
+import { GameSession, GameSettings } from '../types';
 
 interface CountdownScreenProps {
   session: GameSession;
+  settings?: GameSettings;
   onCountdownComplete: (raceStartTimestamp: number) => void;
 }
 

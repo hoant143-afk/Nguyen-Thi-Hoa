@@ -62,9 +62,14 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({
         {/* Center: Match Progress & Category */}
         <div className="hidden md:flex flex-col items-center">
           <div className="flex items-center gap-2">
-            <span className="text-xs tracking-widest font-extrabold uppercase text-slate-400">
-              CAM RACE – ĐẠI CHIẾN TIN HỌC 5
+            <span className="text-xs tracking-widest font-extrabold uppercase text-slate-300">
+              CAM RACE {session.gradeLevel ? `• KHỐI ${session.gradeLevel}` : ''} {session.subject ? `• ${session.subject.toUpperCase()}` : ''}
             </span>
+            {session.lessonTitle && (
+              <span className="text-[11px] bg-cyan-950/80 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/40 font-bold max-w-[220px] truncate" title={session.lessonTitle}>
+                {session.lessonTitle}
+              </span>
+            )}
             {session.className && (
               <span className="text-[11px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700 font-medium">
                 Lớp {session.className}

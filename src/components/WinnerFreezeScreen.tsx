@@ -9,8 +9,9 @@ interface WinnerFreezeScreenProps {
   winner: TeamId;
   snapshotUrl: string | null;
   reactionTimeMs: number | null;
-  settings: GameSettings;
-  onProceedToQuestion: () => void;
+  settings?: GameSettings;
+  onProceedToQuestion?: () => void;
+  onProceed?: () => void;
 }
 
 export const WinnerFreezeScreen: React.FC<WinnerFreezeScreenProps> = ({
@@ -20,20 +21,24 @@ export const WinnerFreezeScreen: React.FC<WinnerFreezeScreenProps> = ({
   reactionTimeMs,
   settings,
   onProceedToQuestion,
+  onProceed,
 }) => {
   const isBlue = winner === 'blue';
   const teamName = isBlue ? session.blueTeamName : session.orangeTeamName;
   const currentQ = session.currentQuestionIndex + 1;
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
 
+  const handleProceed = onProceedToQuestion || onProceed || (() => {});
+
   useEffect(() => {
     // Auto-proceed after freezeDurationMs if not manually clicked
+    const duration = settings?.freezeDurationMs ?? 5000;
     const timer = setTimeout(() => {
-      onProceedToQuestion();
-    }, Math.max(6000, settings.freezeDurationMs + 1000));
+      handleProceed();
+    }, Math.max(5000, duration + 1000));
 
     return () => clearTimeout(timer);
-  }, [onProceedToQuestion, settings.freezeDurationMs]);
+  }, [handleProceed, settings?.freezeDurationMs]);
 
   const handleDownloadSnapshot = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -175,7 +180,7 @@ export const WinnerFreezeScreen: React.FC<WinnerFreezeScreenProps> = ({
           transition={{ delay: 0.2 }}
           onClick={() => {
             soundService.playClick();
-            onProceedToQuestion();
+            handleProceed();
           }}
           className={`mt-2 px-10 py-4 rounded-2xl font-black text-lg text-white uppercase tracking-wider flex items-center gap-3 cursor-pointer shadow-xl transition-transform active:scale-95 ${
             isBlue

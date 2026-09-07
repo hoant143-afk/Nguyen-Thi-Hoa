@@ -1,5 +1,6 @@
 export interface GameDefinition {
   id: string;
+  slug?: string;
   name: string;
   subtitle: string;
   description: string;
@@ -11,6 +12,12 @@ export interface GameDefinition {
   enabled: boolean;
   featured: boolean;
   badge: string;
+  minTeams?: number;
+  maxTeams?: number;
+  supportsCamera?: boolean;
+  supportsQuestions?: boolean;
+  supportsScore?: boolean;
+  supportsCertificate?: boolean;
   theme: {
     gradient: string;
     badgeBg: string;
@@ -23,6 +30,7 @@ export interface GameDefinition {
 export const GAME_REGISTRY: GameDefinition[] = [
   {
     id: 'cam-race',
+    slug: 'cam-race',
     name: 'CAM RACE',
     subtitle: 'Đại chiến Webcam',
     description: 'Thi đấu tốc độ bằng webcam – giơ thẻ màu đội giành quyền trả lời câu hỏi Tin học 5.',
@@ -34,6 +42,10 @@ export const GAME_REGISTRY: GameDefinition[] = [
     enabled: true,
     featured: true,
     badge: '🔥 AI Webcam',
+    supportsCamera: true,
+    supportsQuestions: true,
+    supportsScore: true,
+    supportsCertificate: true,
     theme: {
       gradient: 'from-cyan-600 via-blue-700 to-indigo-800',
       badgeBg: 'bg-cyan-500/20',
@@ -43,24 +55,31 @@ export const GAME_REGISTRY: GameDefinition[] = [
     },
   },
   {
-    id: 'quiz-battle',
-    name: 'QUIZ BATTLE',
-    subtitle: 'Đấu trường Tri thức',
-    description: 'Hai hoặc nhiều đội thi đấu đối kháng trực tiếp, trả lời câu hỏi A/B/C/D, câu đặc biệt và bảng điểm realtime.',
-    iconName: 'Zap',
-    category: 'Trí tuệ & Trắc nghiệm',
-    suitableSubject: 'Mọi môn học (Toán, Tiếng Việt, Tiếng Anh, Tin...)',
+    id: 'smile-race',
+    slug: 'smile-race',
+    name: 'SMILE RACE',
+    subtitle: 'Đại chiến Nụ cười',
+    description: '“3 – 2 – 1 – CƯỜI! Đội tạo cử chỉ cười hợp lệ nhanh nhất giành quyền trả lời.”',
+    minTeams: 2,
+    maxTeams: 4,
+    supportsCamera: true,
+    supportsQuestions: true,
+    supportsScore: true,
+    supportsCertificate: true,
+    iconName: 'Sparkles',
+    category: 'Vận động & AI',
+    suitableSubject: 'Mọi môn học (Khởi động, Kiểm tra, Ôn tập)',
     players: '2 - 4 Đội thi đấu',
-    route: '/games/quiz-battle',
+    route: '/games/smile-race',
     enabled: true,
     featured: true,
-    badge: '⚡ Đối kháng',
+    badge: '😁 Cử chỉ nụ cười',
     theme: {
-      gradient: 'from-amber-600 via-orange-600 to-rose-700',
-      badgeBg: 'bg-amber-500/20',
-      badgeText: 'text-amber-300 border-amber-500/40',
-      accentColor: 'text-amber-400',
-      cardBorder: 'hover:border-amber-400/80 hover:shadow-amber-500/20',
+      gradient: 'from-amber-500 via-purple-600 to-cyan-500',
+      badgeBg: 'bg-amber-100',
+      badgeText: 'text-amber-800 border-amber-300',
+      accentColor: 'text-purple-600',
+      cardBorder: 'hover:border-purple-400 hover:shadow-purple-500/20',
     },
   },
   {
@@ -150,9 +169,11 @@ export const GAME_REGISTRY: GameDefinition[] = [
 ];
 
 export function getGameById(id: string): GameDefinition | undefined {
-  return GAME_REGISTRY.find((g) => g.id === id);
+  if (id === 'quiz-battle') return GAME_REGISTRY.find((g) => g.id === 'smile-race');
+  return GAME_REGISTRY.find((g) => g.id === id || g.slug === id);
 }
 
 export function getGameByRoute(route: string): GameDefinition | undefined {
+  if (route === '/games/quiz-battle') return GAME_REGISTRY.find((g) => g.id === 'smile-race');
   return GAME_REGISTRY.find((g) => g.route === route);
 }

@@ -7,21 +7,34 @@ import { soundService } from '../services/soundService';
 
 interface AnswerResultScreenProps {
   session: GameSession;
-  answeringTeam: TeamId;
-  selectedAnswerIndex: number;
+  answeringTeam?: TeamId;
+  activeTeam?: TeamId;
+  selectedAnswerIndex?: number;
+  selectedIndex?: number;
   isCorrect: boolean;
-  onProceedToNext: () => void;
-  onProceedToSteal: () => void;
+  onProceedToNext?: () => void;
+  onProceedNext?: () => void;
+  onProceedToSteal?: () => void;
+  onProceedSteal?: () => void;
 }
 
 export const AnswerResultScreen: React.FC<AnswerResultScreenProps> = ({
   session,
-  answeringTeam,
-  selectedAnswerIndex,
+  answeringTeam: propAnsweringTeam,
+  activeTeam,
+  selectedAnswerIndex: propSelectedAnswerIndex,
+  selectedIndex,
   isCorrect,
   onProceedToNext,
+  onProceedNext,
   onProceedToSteal,
+  onProceedSteal,
 }) => {
+  const answeringTeam = propAnsweringTeam || activeTeam || session.currentRaceWinner || 'blue';
+  const selectedAnswerIndex = propSelectedAnswerIndex ?? selectedIndex ?? 0;
+  const handleProceedNext = onProceedToNext || onProceedNext || (() => {});
+  const handleProceedSteal = onProceedToSteal || onProceedSteal || (() => {});
+
   const currentQ = session.questions[session.currentQuestionIndex];
   const isBlue = answeringTeam === 'blue';
   const teamName = isBlue ? session.blueTeamName : session.orangeTeamName;
@@ -160,7 +173,7 @@ export const AnswerResultScreen: React.FC<AnswerResultScreenProps> = ({
             <button
               onClick={() => {
                 soundService.playClick();
-                onProceedToNext();
+                handleProceedNext();
               }}
               className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-base md:text-lg py-3.5 px-8 rounded-2xl shadow-xl shadow-emerald-500/30 flex items-center gap-3 cursor-pointer transition-transform active:scale-95 uppercase tracking-wider"
             >
@@ -171,7 +184,7 @@ export const AnswerResultScreen: React.FC<AnswerResultScreenProps> = ({
             <button
               onClick={() => {
                 soundService.playClick();
-                onProceedToSteal();
+                handleProceedSteal();
               }}
               className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-black text-base md:text-lg py-3.5 px-8 rounded-2xl shadow-xl shadow-orange-500/30 flex items-center gap-3 cursor-pointer transition-transform active:scale-95 uppercase tracking-wider"
             >

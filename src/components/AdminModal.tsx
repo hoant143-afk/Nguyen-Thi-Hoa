@@ -1,9 +1,27 @@
 import React, { useState } from 'react';
-import { Settings, HelpCircle, Plus, Trash2, ArrowUp, ArrowDown, Edit2, RotateCcw, X, Check, Sparkles, Volume2, Upload } from 'lucide-react';
-import { Question, GameSettings } from '../types';
+import {
+  Settings,
+  HelpCircle,
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Edit2,
+  RotateCcw,
+  X,
+  Check,
+  Sparkles,
+  Volume2,
+  Upload,
+  BookOpen,
+  Layers,
+} from 'lucide-react';
+import { Question, GameSettings, QuestionBankLesson } from '../types';
 import { DEFAULT_QUESTIONS, DEFAULT_SETTINGS } from '../data/defaultQuestions';
 import { soundService } from '../services/soundService';
 import { QuestionImportModal } from './common/QuestionImportModal';
+import { QuestionBankSelector } from './common/QuestionBankSelector';
+import { QuestionBankRepository } from '../repositories/questionBankRepository';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -27,6 +45,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [localSettings, setLocalSettings] = useState<GameSettings>(settings);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
+  const [showBankModal, setShowBankModal] = useState<boolean>(false);
+  const [loadedLessonTitle, setLoadedLessonTitle] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -136,6 +156,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 Chỉnh sửa, thêm mới, sắp xếp thứ tự hoặc đánh dấu câu đặc biệt cho trận đấu:
               </p>
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setShowBankModal(true);
+                  }}
+                  className="flex items-center gap-1.5 text-xs font-black text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900/80 px-3 py-1.5 rounded-lg border border-cyan-500/40 cursor-pointer shadow transition-all"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>📚 Ngân Hàng (Khối 1 - 9)</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -531,6 +562,25 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           setEditingIndex(null);
         }}
       />
+
+      {/* QUESTION BANK SELECTOR MODAL */}
+      {showBankModal && (
+        <div className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-950 border border-slate-700 rounded-3xl w-full max-w-3xl max-h-[90vh] p-6 shadow-2xl overflow-y-auto animate-in zoom-in-95 duration-150">
+            <QuestionBankSelector
+              isModal={true}
+              selectedLessonId=""
+              onSelectLesson={(lesson) => {
+                setLocalQuestions(lesson.questions);
+                setLoadedLessonTitle(lesson.lessonTitle);
+                setEditingIndex(null);
+                setShowBankModal(false);
+              }}
+              onClose={() => setShowBankModal(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

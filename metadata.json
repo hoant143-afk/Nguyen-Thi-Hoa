@@ -1,6 +1,6 @@
 {
   "name": "EDUPLAY – Hệ Thống Trò Chơi Tương Tác Lớp Học",
-  "description": "Nền tảng EdTech trò chơi tương tác đa năng dành cho lớp học: Cam Race, Quiz Battle, Vòng quay may mắn, Ai nhanh hơn, Gọi tên ngẫu nhiên, Thử thách đồng đội.",
+  "description": "Nền tảng EdTech trò chơi tương tác đa năng dành cho lớp học: Cam Race, Smile Race (Đại chiến Nụ cười), Vòng quay may mắn, Ai nhanh hơn, Gọi tên ngẫu nhiên, Thử thách đồng đội.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

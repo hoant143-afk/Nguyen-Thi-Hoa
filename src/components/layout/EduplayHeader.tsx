@@ -53,7 +53,7 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 px-4 lg:px-8 py-3">
+    <header className="sticky top-0 z-40 bg-white/85 backdrop-blur-md border-b border-rose-200/80 px-4 lg:px-8 py-3 shadow-xs">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         {/* Logo & Slogan */}
         <div
@@ -63,26 +63,26 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
           }}
           className="flex items-center gap-3 cursor-pointer group select-none"
         >
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/25 group-hover:scale-105 transition-transform">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-rose-500 via-pink-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-rose-500/25 group-hover:scale-105 transition-transform">
             <GraduationCap className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-300 to-indigo-300">
+              <span className="text-xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-rose-600 via-pink-600 to-indigo-600">
                 EDUPLAY
               </span>
-              <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 tracking-wider">
+              <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200 tracking-wider">
                 Lớp học 4.0
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 font-medium hidden sm:block">
+            <p className="text-[11px] text-slate-500 font-medium hidden sm:block">
               “Học vui – Chơi chất – Tương tác thật”
             </p>
           </div>
         </div>
 
         {/* Navigation items */}
-        <nav className="hidden md:flex items-center gap-1 bg-slate-900/80 border border-slate-800 p-1 rounded-2xl text-xs font-bold">
+        <nav className="hidden md:flex items-center gap-1 bg-rose-50/80 border border-rose-200/90 p-1 rounded-2xl text-xs font-bold shadow-xs">
           <button
             onClick={() => {
               soundService.playClick();
@@ -90,8 +90,8 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
             }}
             className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer ${
               currentRoute === '/'
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-black shadow-md'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                ? 'bg-gradient-to-r from-rose-500 to-pink-600 text-white font-black shadow-md shadow-rose-500/25'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white'
             }`}
           >
             Trang chủ
@@ -101,9 +101,9 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
               soundService.playClick();
               onNavigate('/#games');
             }}
-            className="px-3.5 py-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer flex items-center gap-1.5"
+            className="px-3.5 py-1.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-white transition-all cursor-pointer flex items-center gap-1.5"
           >
-            <Gamepad2 className="w-3.5 h-3.5 text-cyan-400" />
+            <Gamepad2 className="w-3.5 h-3.5 text-rose-500" />
             <span>Kho trò chơi</span>
           </button>
           <button
@@ -111,9 +111,9 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
               soundService.playClick();
               onOpenTeacherDashboard();
             }}
-            className="px-3.5 py-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer flex items-center gap-1.5"
+            className="px-3.5 py-1.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-white transition-all cursor-pointer flex items-center gap-1.5"
           >
-            <Users className="w-3.5 h-3.5 text-amber-400" />
+            <Users className="w-3.5 h-3.5 text-amber-500" />
             <span>Dành cho Giáo viên</span>
           </button>
         </nav>
@@ -126,10 +126,10 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
           {/* Sound Toggle */}
           <button
             onClick={toggleSound}
-            className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${
+            className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all cursor-pointer shadow-xs ${
               isMuted
-                ? 'border-slate-800 bg-slate-900/60 text-slate-500'
-                : 'border-slate-700 bg-slate-900 text-cyan-400 hover:border-cyan-500/50'
+                ? 'border-rose-200 bg-rose-50/70 text-slate-400'
+                : 'border-rose-200 bg-white text-rose-600 hover:bg-rose-50'
             }`}
             title={isMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
           >
@@ -139,10 +139,10 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
           {/* Fullscreen Toggle for classroom projectors */}
           <button
             onClick={toggleFullscreen}
-            className="w-9 h-9 rounded-xl border border-slate-700 bg-slate-900 hover:border-blue-500/50 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+            className="w-9 h-9 rounded-xl border border-rose-200 bg-white hover:bg-rose-50 text-slate-700 flex items-center justify-center transition-all cursor-pointer shadow-xs"
             title="Toàn màn hình máy chiếu (16:9)"
           >
-            {isFullscreen ? <Minimize2 className="w-4 h-4 text-cyan-400" /> : <Maximize2 className="w-4 h-4" />}
+            {isFullscreen ? <Minimize2 className="w-4 h-4 text-rose-600" /> : <Maximize2 className="w-4 h-4" />}
           </button>
 
           {/* Teacher dashboard quick button */}
@@ -151,7 +151,7 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
               soundService.playClick();
               onOpenTeacherDashboard();
             }}
-            className="hidden sm:flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-3.5 py-2 rounded-xl text-xs font-black shadow-lg shadow-blue-500/20 cursor-pointer transition-transform active:scale-95"
+            className="hidden sm:flex items-center gap-1.5 bg-gradient-to-r from-rose-500 via-pink-600 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-black shadow-lg shadow-rose-500/20 cursor-pointer transition-transform active:scale-95"
           >
             <GraduationCap className="w-4 h-4" />
             <span>Bảng điều khiển GV</span>

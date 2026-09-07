@@ -36,6 +36,7 @@ export interface Team {
 }
 
 export interface TeamPreset {
+  id?: string;
   code: 'TEAM1' | 'TEAM2' | 'TEAM3' | 'TEAM4';
   defaultName: string;
   color: string;
@@ -54,12 +55,25 @@ export interface TeamSetupConfig {
   }[];
 }
 
+export type GradeLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+export interface QuestionBankLesson {
+  id: string;
+  grade: GradeLevel;
+  subject: string;
+  lessonNumber: number;
+  lessonTitle: string;
+  description?: string;
+  questions: Question[];
+}
+
 export interface Question {
   id: number;
   bankId?: string;
   subject?: string;
-  grade?: string;
+  grade?: string | number;
   topic?: string;
+  lessonId?: string;
   questionType?: string;
   question: string;
   options: string[]; // 4 choices [A, B, C, D]
@@ -178,6 +192,11 @@ export interface GameSession {
   // Dynamic multi-team support
   teamCount?: TeamCount;
   teams?: Team[];
+  // Question Bank Lesson metadata
+  gradeLevel?: GradeLevel;
+  subject?: string;
+  lessonId?: string;
+  lessonTitle?: string;
 }
 
 export interface UniversalGameSession {

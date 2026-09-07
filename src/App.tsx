@@ -3,7 +3,7 @@ import { EduplayHeader } from './components/layout/EduplayHeader';
 import { EduplayFooter } from './components/layout/EduplayFooter';
 import { EduplayHome } from './components/EduplayHome';
 import { CamRaceGame } from './games/cam-race/CamRaceGame';
-import { QuizBattleGame } from './games/quiz-battle/QuizBattleGame';
+import { SmileRaceGame } from './games/smile-race/SmileRaceGame';
 import { LuckyWheelGame } from './games/lucky-wheel/LuckyWheelGame';
 import { FastestHandGame } from './games/fastest-hand/FastestHandGame';
 import { RandomPickerGame } from './games/random-picker/RandomPickerGame';
@@ -59,8 +59,8 @@ export default function App() {
     return <CamRaceGame onBackToEduplay={() => navigateTo('/')} />;
   }
 
-  if (currentRoute === '/games/quiz-battle') {
-    return <QuizBattleGame onBackToEduplay={() => navigateTo('/')} />;
+  if (currentRoute === '/games/smile-race' || currentRoute === '/games/quiz-battle') {
+    return <SmileRaceGame onBackToEduplay={() => navigateTo('/')} />;
   }
 
   if (currentRoute === '/games/lucky-wheel') {
@@ -85,7 +85,11 @@ export default function App() {
 
   // Default: EDUPLAY Platform Home
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-slate-950 font-sans">
+    <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50/75 to-rose-100/50 text-slate-800 flex flex-col selection:bg-rose-500 selection:text-white font-sans relative">
+      {/* Soft decorative background ambient orbs for warm, light atmosphere */}
+      <div className="fixed top-0 left-1/4 w-[500px] h-[500px] bg-rose-200/25 rounded-full blur-3xl pointer-events-none -z-10" />
+      <div className="fixed bottom-0 right-1/4 w-[500px] h-[500px] bg-pink-200/25 rounded-full blur-3xl pointer-events-none -z-10" />
+
       <EduplayHeader
         currentRoute={currentRoute}
         onNavigate={navigateTo}

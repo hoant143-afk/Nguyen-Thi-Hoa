@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GameSession, GameSettings, TeamId, Question } from '../../types';
+import { GameSession, GameSettings, TeamId, Question, QuestionBankLesson } from '../../types';
 import { DEFAULT_QUESTIONS } from '../../data/defaultQuestions';
 import { GameRepository } from '../../repositories/gameRepository';
 import { ScoringService } from '../../services/scoringService';
@@ -24,6 +24,7 @@ import { FinalResultScreen } from '../../components/FinalResultScreen';
 import { CertificateScreen } from '../../components/CertificateScreen';
 import { CameraCalibrationModal } from '../../components/CameraCalibrationModal';
 import { AdminModal } from '../../components/AdminModal';
+import { GameErrorBoundary } from '../../components/common/GameErrorBoundary';
 
 interface CamRaceGameProps {
   onBackToEduplay: () => void;
@@ -91,7 +92,18 @@ export const CamRaceGame: React.FC<CamRaceGameProps> = ({ onBackToEduplay }) => 
     className: string;
     teacherName: string;
     schoolName: string;
+    selectedLesson?: QuestionBankLesson;
   }) => {
+    const activeQuestions =
+      formData.selectedLesson && formData.selectedLesson.questions.length > 0
+        ? formData.selectedLesson.questions
+        : questions;
+
+    if (formData.selectedLesson) {
+      setQuestions(activeQuestions);
+      GameRepository.saveQuestions(activeQuestions);
+    }
+
     const newSession: GameSession = {
       gameId: `game_${Date.now()}`,
       blueTeamName: formData.blueTeamName,
@@ -107,10 +119,14 @@ export const CamRaceGame: React.FC<CamRaceGameProps> = ({ onBackToEduplay }) => 
       raceStartTimestamp: null,
       winnerReactionTimeMs: null,
       history: [],
-      questions: questions,
+      questions: activeQuestions,
       state: 'READY',
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      gradeLevel: formData.selectedLesson?.grade,
+      subject: formData.selectedLesson?.subject,
+      lessonId: formData.selectedLesson?.id,
+      lessonTitle: formData.selectedLesson?.lessonTitle,
     };
 
     setSession(newSession);
@@ -119,11 +135,11 @@ export const CamRaceGame: React.FC<CamRaceGameProps> = ({ onBackToEduplay }) => 
     if (apiClient.getMode() === 'cloud') {
       SessionsRepository.createSession({
         gameSlug: 'cam-race',
-        activityName: `Cam Race - ${formData.className}`,
+        activityName: `Cam Race - ${formData.className} (${formData.selectedLesson?.subject || 'Tin học'})`,
         className: formData.className,
         blueTeamName: formData.blueTeamName,
         orangeTeamName: formData.orangeTeamName,
-        totalQuestions: questions.length,
+        totalQuestions: activeQuestions.length,
       })
         .then((cloudSes) => {
           if (cloudSes) {
@@ -474,106 +490,125 @@ export const CamRaceGame: React.FC<CamRaceGameProps> = ({ onBackToEduplay }) => 
 
       {/* Main Game Screen Router */}
       <main className="flex-1 flex flex-col items-center justify-center p-2 md:p-4 relative">
-        {session.state === 'HOME' && (
-          <HomeScreen
-            initialSession={session}
-            savedSession={savedSession}
-            onStartNewGame={handleStartNewGame}
-            onResumeGame={handleResumeGame}
-            onOpenCalibration={() => setIsCalibrationOpen(true)}
-            onOpenAdmin={() => setIsAdminOpen(true)}
-            settings={settings}
-          />
-        )}
+        <GameErrorBoundary
+          onSkip={handleProceedToQuestion}
+          onReset={handleRetryRace}
+          onGoHome={handleGoHome}
+        >
+          {session.state === 'HOME' && (
+            <HomeScreen
+              initialSession={session}
+              savedSession={savedSession}
+              onStartNewGame={handleStartNewGame}
+              onResumeGame={handleResumeGame}
+              onOpenCalibration={() => setIsCalibrationOpen(true)}
+              onOpenAdmin={() => setIsAdminOpen(true)}
+              settings={settings}
+            />
+          )}
 
-        {session.state === 'READY' && (
-          <ReadyScreen
-            session={session}
-            settings={settings}
-            onStartCountdown={handleStartCountdown}
-            onGoHome={handleGoHome}
-          />
-        )}
+          {session.state === 'READY' && (
+            <ReadyScreen
+              session={session}
+              settings={settings}
+              onStartCountdown={handleStartCountdown}
+              onGoHome={handleGoHome}
+            />
+          )}
 
-        {session.state === 'COUNTDOWN' && (
-          <CountdownScreen
-            session={session}
-            settings={settings}
-            onCountdownComplete={handleCountdownComplete}
-          />
-        )}
+          {session.state === 'COUNTDOWN' && (
+            <CountdownScreen
+              session={session}
+              settings={settings}
+              onCountdownComplete={handleCountdownComplete}
+            />
+          )}
 
-        {session.state === 'CAMERA_RACE' && (
-          <CameraRaceScreen
-            session={session}
-            settings={settings}
-            onWinnerLock={handleWinnerLock}
-            onTie={handleTie}
-          />
-        )}
+          {session.state === 'CAMERA_RACE' && (
+            <CameraRaceScreen
+              session={session}
+              settings={settings}
+              raceStartTimestamp={session.raceStartTimestamp}
+              onWinnerLock={handleWinnerLock}
+              onTie={handleTie}
+            />
+          )}
 
-        {session.state === 'WINNER_FREEZE' && session.currentRaceWinner && (
-          <WinnerFreezeScreen
-            session={session}
-            winner={session.currentRaceWinner}
-            snapshotUrl={session.winnerSnapshotUrl}
-            reactionTimeMs={session.winnerReactionTimeMs}
-            onProceed={handleProceedToQuestion}
-          />
-        )}
+          {session.state === 'WINNER_FREEZE' && session.currentRaceWinner && (
+            <WinnerFreezeScreen
+              session={session}
+              winner={session.currentRaceWinner}
+              snapshotUrl={session.winnerSnapshotUrl}
+              reactionTimeMs={session.winnerReactionTimeMs}
+              settings={settings}
+              onProceedToQuestion={handleProceedToQuestion}
+              onProceed={handleProceedToQuestion}
+            />
+          )}
 
-        {session.state === 'TIE_FREEZE' && (
-          <TieScreen onRetry={handleRetryRace} />
-        )}
+          {session.state === 'TIE_FREEZE' && (
+            <TieScreen
+              session={session}
+              onRetryRace={handleRetryRace}
+              onRetry={handleRetryRace}
+            />
+          )}
 
-        {session.state === 'QUESTION' && session.currentRaceWinner && (
-          <QuestionScreen
-            session={session}
-            settings={settings}
-            activeTeam={session.currentRaceWinner}
-            onSelectAnswer={handleSelectAnswer}
-            onTimeout={handleQuestionTimeout}
-          />
-        )}
+          {session.state === 'QUESTION' && session.currentRaceWinner && (
+            <QuestionScreen
+              session={session}
+              settings={settings}
+              activeTeam={session.currentRaceWinner}
+              onSelectAnswer={handleSelectAnswer}
+              onTimeout={handleQuestionTimeout}
+            />
+          )}
 
-        {session.state === 'ANSWER_RESULT' && selectedAnswerIndex !== null && session.currentRaceWinner && (
-          <AnswerResultScreen
-            session={session}
-            isCorrect={isAnswerCorrect}
-            selectedIndex={selectedAnswerIndex}
-            activeTeam={session.currentRaceWinner}
-            onProceedNext={handleProceedToNext}
-            onProceedSteal={handleProceedToSteal}
-          />
-        )}
+          {session.state === 'ANSWER_RESULT' && selectedAnswerIndex !== null && session.currentRaceWinner && (
+            <AnswerResultScreen
+              session={session}
+              isCorrect={isAnswerCorrect}
+              selectedAnswerIndex={selectedAnswerIndex}
+              selectedIndex={selectedAnswerIndex}
+              answeringTeam={session.currentRaceWinner}
+              activeTeam={session.currentRaceWinner}
+              onProceedToNext={handleProceedToNext}
+              onProceedNext={handleProceedToNext}
+              onProceedToSteal={handleProceedToSteal}
+              onProceedSteal={handleProceedToSteal}
+            />
+          )}
 
-        {session.state === 'STEAL' && stealingTeam && selectedAnswerIndex !== null && (
-          <StealScreen
-            session={session}
-            settings={settings}
-            stealingTeam={stealingTeam}
-            previousWrongIndex={selectedAnswerIndex}
-            onStealSubmit={handleStealSubmit}
-            onProceedNext={handleProceedToNext}
-          />
-        )}
+          {session.state === 'STEAL' && stealingTeam && selectedAnswerIndex !== null && (
+            <StealScreen
+              session={session}
+              settings={settings}
+              stealingTeam={stealingTeam}
+              previousWrongIndex={selectedAnswerIndex}
+              onStealSubmit={handleStealSubmit}
+              onProceedToNext={handleProceedToNext}
+              onProceedNext={handleProceedToNext}
+            />
+          )}
 
-        {session.state === 'FINAL_RESULT' && (
-          <FinalResultScreen
-            session={session}
-            onRestart={handleRestartGame}
-            onOpenCertificate={() => setSession((prev) => ({ ...prev, state: 'CERTIFICATE' }))}
-            onGoHome={handleGoHome}
-          />
-        )}
+          {session.state === 'FINAL_RESULT' && (
+            <FinalResultScreen
+              session={session}
+              onRestartGame={handleRestartGame}
+              onRestart={handleRestartGame}
+              onOpenCertificate={() => setSession((prev) => ({ ...prev, state: 'CERTIFICATE' }))}
+              onGoHome={handleGoHome}
+            />
+          )}
 
-        {session.state === 'CERTIFICATE' && (
-          <CertificateScreen
-            session={session}
-            onBack={() => setSession((prev) => ({ ...prev, state: 'FINAL_RESULT' }))}
-            onGoHome={handleGoHome}
-          />
-        )}
+          {session.state === 'CERTIFICATE' && (
+            <CertificateScreen
+              session={session}
+              onBack={() => setSession((prev) => ({ ...prev, state: 'FINAL_RESULT' }))}
+              onGoHome={handleGoHome}
+            />
+          )}
+        </GameErrorBoundary>
       </main>
 
       {/* Global Modals */}

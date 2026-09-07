@@ -77,9 +77,9 @@ export const CloudSyncStatus: React.FC = () => {
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
             status.mode === 'cloud'
               ? status.isCloudReachable
-                ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/40'
-                : 'bg-amber-950/40 text-amber-300 border-amber-500/40 hover:bg-amber-900/40'
-              : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700/80'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+              : 'bg-white text-slate-600 border-rose-200/90 hover:bg-rose-50 hover:text-slate-800 shadow-xs'
           }`}
         >
           {status.mode === 'cloud' ? (
