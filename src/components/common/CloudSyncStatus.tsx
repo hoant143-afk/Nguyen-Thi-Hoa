@@ -51,20 +51,21 @@ export const CloudSyncStatus: React.FC = () => {
     <>
       {/* Top Banner Warning if in Cloud Mode but disconnected */}
       {status.mode === 'cloud' && !status.isCloudReachable && (
-        <div className="bg-amber-950/80 border-b border-amber-600/50 text-amber-200 px-4 py-2 text-xs flex items-center justify-between">
+        <div id="offline-database-banner" className="bg-amber-900 border-b border-amber-500/60 text-amber-100 px-4 py-2.5 text-xs flex items-center justify-between shadow-md">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="text-base">⚠️</span>
             <span>
-              <strong>Mất kết nối Google Sheets:</strong> EDUPLAY đang tạm thời lưu kết quả trên trình duyệt. Sẽ tự động tải lên khi có mạng.
+              <strong className="font-bold tracking-wide">MẤT KẾT NỐI DATABASE:</strong> Dữ liệu điểm và lượt chơi đang tạm lưu an toàn trên thiết bị (chống trùng lặp bằng eventKey).
             </span>
           </div>
           <button
+            id="retry-sync-btn"
             onClick={handleManualSync}
             disabled={isSyncing}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs transition-colors shrink-0 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-lg text-xs transition-colors shrink-0 shadow-xs cursor-pointer disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Đang thử lại...' : 'Thử kết nối lại'}
+            {isSyncing ? 'Đang đồng bộ...' : '🔄 ĐỒNG BỘ LẠI'}
           </button>
         </div>
       )}

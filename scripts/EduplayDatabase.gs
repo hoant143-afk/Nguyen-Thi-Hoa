@@ -1,15 +1,14 @@
 /**
  * ==============================================================================
- * 🎓 EDUPLAY - GOOGLE APPS SCRIPT CLOUD DATABASE & REST API ENGINE
- * Slogan: "Học vui – Chơi chất – Tương tác thật"
- * Architecture: EDUPLAY React Web <-> Apps Script API (/exec) <-> Google Sheets
- * Version: 3.0.0
+ * 🎓 EDUPLAY - HỆ THỐNG TRÒ CHƠI TƯƠNG TÁC THEO ĐỘI (GOOGLE APPS SCRIPT ENGINE)
+ * Kiến trúc: Database Google Sheets chuẩn hóa theo mô hình 2–4 ĐỘI
+ * Phiên bản: 4.0.0 (Team-First Architecture & REST-style Web App API)
  * Timezone: Asia/Ho_Chi_Minh
  * ==============================================================================
  */
 
 // ==========================================
-// 1. GLOBAL CONFIGURATION & SCHEMA REGISTRY
+// 1. CẤU HÌNH HỆ THỐNG & ĐỊNH NGHĨA 18 SCHEMAS
 // ==========================================
 
 const TIMEZONE = 'Asia/Ho_Chi_Minh';
@@ -18,7 +17,7 @@ const EDUPLAY_HEADER_TEXT = '#f8fafc'; // Slate 50
 const EDUPLAY_HEADER_FONT_SIZE = 10;
 const EDUPLAY_FONT_FAMILY = 'Arial';
 
-// 16 Bảng dữ liệu chuẩn của hệ sinh thái EDUPLAY
+// Danh mục 18 Bảng dữ liệu chuẩn của hệ sinh thái EDUPLAY (Team-Only)
 const EDUPLAY_SCHEMAS = {
   SETTINGS: [
     'key', 'value', 'category', 'description', 'updatedAt'
@@ -30,385 +29,358 @@ const EDUPLAY_SCHEMAS = {
   ],
   CLASSES: [
     'id', 'classCode', 'className', 'grade', 'schoolYear', 'teacherName',
-    'schoolName', 'subject', 'studentCount', 'enabled', 'createdAt', 'updatedAt'
-  ],
-  STUDENTS: [
-    'id', 'classId', 'studentCode', 'fullName', 'displayName', 'groupName',
-    'teamPreference', 'enabled', 'createdAt', 'updatedAt'
+    'schoolName', 'subject', 'enabled', 'createdAt', 'updatedAt'
   ],
   QUESTION_BANKS: [
-    'id', 'name', 'subject', 'grade', 'topic', 'description',
+    'id', 'bankCode', 'name', 'subject', 'grade', 'topic', 'description',
     'questionCount', 'enabled', 'createdAt', 'updatedAt'
   ],
   QUESTIONS: [
     'id', 'bankId', 'order', 'subject', 'grade', 'topic', 'questionType',
     'question', 'optionA', 'optionB', 'optionC', 'optionD', 'correctAnswer',
-    'explanation', 'difficulty', 'normalPoints', 'stealPoints', 'specialPoints',
-    'isSpecial', 'enabled', 'tags', 'createdAt', 'updatedAt'
+    'explanation', 'difficulty', 'normalPoints', 'specialPoints', 'isSpecial',
+    'enabled', 'tags', 'createdAt', 'updatedAt'
   ],
   GAME_SESSIONS: [
     'id', 'sessionCode', 'gameId', 'gameSlug', 'activityName', 'classId',
-    'className', 'teacherName', 'subject', 'grade', 'questionBankId',
-    'status', 'currentRound', 'currentQuestion', 'totalQuestions',
-    'startedAt', 'finishedAt', 'winnerTeamId', 'winnerName', 'createdAt', 'updatedAt'
+    'className', 'teacherName', 'schoolName', 'subject', 'grade', 'questionBankId',
+    'teamCount', 'status', 'currentRound', 'currentQuestion', 'totalQuestions',
+    'winnerTeamId', 'winnerTeamName', 'startedAt', 'finishedAt', 'createdAt', 'updatedAt'
   ],
   TEAMS: [
-    'id', 'sessionId', 'teamCode', 'teamName', 'teamColor', 'score', 'rank',
-    'raceWins', 'correctAnswers', 'wrongAnswers', 'stealWins', 'specialCorrect',
-    'createdAt', 'updatedAt'
-  ],
-  PARTICIPANTS: [
-    'id', 'sessionId', 'studentId', 'studentName', 'teamId', 'teamCode',
-    'participationOrder', 'timesSelected', 'score', 'createdAt', 'updatedAt'
+    'id', 'sessionId', 'teamCode', 'teamName', 'teamColor', 'markerColor',
+    'score', 'rank', 'correctAnswers', 'wrongAnswers', 'stealWins',
+    'bonusPoints', 'penaltyPoints', 'specialCorrect', 'createdAt', 'updatedAt'
   ],
   SCORE_EVENTS: [
     'id', 'sessionId', 'gameSlug', 'roundNumber', 'questionId', 'teamId',
-    'teamCode', 'studentId', 'eventType', 'points', 'eventKey', 'note', 'createdAt'
+    'teamCode', 'eventType', 'points', 'eventKey', 'note', 'createdAt'
   ],
   GAME_RESULTS: [
-    'id', 'sessionId', 'gameSlug', 'teamId', 'teamName', 'finalScore',
-    'rank', 'correctAnswers', 'wrongAnswers', 'bonusPoints', 'winner',
-    'statsJson', 'createdAt'
+    'id', 'sessionId', 'gameSlug', 'teamId', 'teamCode', 'teamName', 'teamColor',
+    'finalScore', 'rank', 'correctAnswers', 'wrongAnswers', 'stealWins',
+    'bonusPoints', 'penaltyPoints', 'specialCorrect', 'winner', 'statsJson', 'createdAt'
   ],
   CAM_RACE_RESULTS: [
-    'id', 'sessionId', 'questionId', 'questionOrder', 'winnerTeam',
-    'blueDetectedAt', 'orangeDetectedAt', 'timeDifferenceMs', 'isTie',
-    'isFalseStart', 'detectionMethod', 'blueMarkerConfidence',
-    'orangeMarkerConfidence', 'firstAnswerTeam', 'firstAnswer',
-    'firstAnswerCorrect', 'stealTeam', 'stealAnswer', 'stealCorrect',
-    'bluePoints', 'orangePoints', 'playedAt'
+    'id', 'sessionId', 'questionId', 'questionOrder', 'winnerTeamId', 'winnerTeamCode',
+    'blueDetectedAt', 'orangeDetectedAt', 'timeDifferenceMs', 'isTie', 'isFalseStart',
+    'detectionMethod', 'blueMarkerConfidence', 'orangeMarkerConfidence', 'firstAnswer',
+    'firstAnswerCorrect', 'stealTeamId', 'stealAnswer', 'stealCorrect', 'pointsAwarded', 'playedAt'
+  ],
+  SMILE_RACE_RESULTS: [
+    'id', 'sessionId', 'questionId', 'questionOrder', 'winnerTeamId', 'winnerTeamCode',
+    'winnerTeamName', 'gestureTimestamp', 'gestureScore', 'markerConfidence',
+    'stableFrames', 'isTie', 'detectionMethod', 'firstAnswer', 'firstAnswerCorrect',
+    'stealTeamId', 'stealTeamCode', 'stealAnswer', 'stealCorrect', 'fullPoints',
+    'stealPoints', 'pointsAwarded', 'playedAt'
+  ],
+  FASTEST_HAND_RESULTS: [
+    'id', 'sessionId', 'roundNumber', 'questionId', 'winnerTeamId', 'winnerTeamCode',
+    'buzzTimestamp', 'responseTimeMs', 'answer', 'isCorrect', 'pointsAwarded', 'playedAt'
   ],
   LUCKY_WHEEL_HISTORY: [
-    'id', 'sessionId', 'spinNumber', 'wheelType', 'selectedId',
-    'selectedName', 'reward', 'points', 'createdAt'
+    'id', 'sessionId', 'spinNumber', 'wheelType', 'selectedTeamId',
+    'selectedTeamName', 'selectedValue', 'reward', 'points', 'createdAt'
   ],
-  RANDOM_PICKER_HISTORY: [
-    'id', 'sessionId', 'studentId', 'studentName', 'pickNumber',
-    'excludedAfterPick', 'pickedAt'
+  RANDOM_TEAM_HISTORY: [
+    'id', 'sessionId', 'pickNumber', 'pickType', 'selectedTeamId',
+    'selectedTeamName', 'selectedValue', 'excludedAfterPick', 'pickedAt'
+  ],
+  TEAM_CHALLENGE_RESULTS: [
+    'id', 'sessionId', 'roundNumber', 'questionId', 'teamId', 'teamCode',
+    'answer', 'isCorrect', 'eventType', 'pointsAwarded', 'createdAt'
   ],
   CERTIFICATES: [
-    'id', 'sessionId', 'gameSlug', 'recipientType', 'recipientId',
-    'recipientName', 'awardTitle', 'score', 'rank', 'teacherName',
-    'className', 'schoolName', 'certificateCode', 'issuedAt'
+    'id', 'sessionId', 'gameSlug', 'teamId', 'teamCode', 'teamName',
+    'awardTitle', 'finalScore', 'rank', 'teacherName', 'className',
+    'schoolName', 'certificateCode', 'issuedAt'
+  ],
+  IMPORT_HISTORY: [
+    'id', 'importType', 'fileName', 'fileType', 'targetBankId', 'totalRows',
+    'createdRows', 'updatedRows', 'skippedRows', 'errorRows', 'mode', 'createdAt'
   ],
   APP_LOGS: [
-    'id', 'level', 'module', 'action', 'message', 'sessionId',
-    'payload', 'createdAt'
+    'id', 'level', 'module', 'action', 'message', 'sessionId', 'payload', 'createdAt'
   ]
 };
 
 // ==========================================
-// 2. HTTP ENTRY POINTS: doGet & doPost
+// 2. MENU GOOGLE SHEET (onOpen)
+// ==========================================
+
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('🎓 EDUPLAY')
+    .addItem('⚙️ Setup / Update Database', 'setupDatabase')
+    .addSeparator()
+    .addItem('🎮 Update Game Catalog', 'menuSeedCatalog')
+    .addItem('📝 Seed 15 Questions', 'menuSeedQuestions')
+    .addItem('🔄 Migrate Legacy Database', 'migrateLegacyDatabase')
+    .addSeparator()
+    .addItem('📊 Database Summary', 'showDatabaseSummary')
+    .addToUi();
+}
+
+function menuSeedCatalog() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  seedGameCatalog(ss);
+  SpreadsheetApp.getUi().alert('🎮 Đã cập nhật 6 game chính thức vào GAME_CATALOG!');
+}
+
+function menuSeedQuestions() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  seedQuestionBanks(ss);
+  seedQuestions(ss);
+  SpreadsheetApp.getUi().alert('📝 Đã nạp 15 câu hỏi Tin học 5 vào ngân hàng câu hỏi!');
+}
+
+// ==========================================
+// 3. CORE WEB APP ENTRY POINTS (doGet / doPost)
 // ==========================================
 
 /**
- * Handle GET requests (e.g. /exec?action=settings.get or /exec?action=questions.listByBank&bankId=xxx)
+ * Handle GET requests (e.g. /exec?action=settings.get)
  */
 function doGet(e) {
   try {
-    const params = (e && e.parameter) ? e.parameter : {};
-    const action = params.action || 'settings.get';
-    
-    // Convert GET parameters into data payload
+    const action = e && e.parameter && e.parameter.action ? String(e.parameter.action).trim() : 'settings.get';
     const data = {};
-    Object.keys(params).forEach(key => {
-      if (key !== 'action') {
-        data[key] = params[key];
-      }
-    });
-
-    return handleApiRequest(action, data);
+    if (e && e.parameter) {
+      Object.keys(e.parameter).forEach(k => {
+        if (k !== 'action') {
+          data[k] = e.parameter[k];
+        }
+      });
+    }
+    const response = handleApiRequest(action, data);
+    return createJsonResponse(response);
   } catch (err) {
-    appendLog('ERROR', 'API', 'doGet', err.toString(), '', e);
-    return errorResponse('SERVER_ERROR', err.toString());
+    appendLog('ERROR', 'SYSTEM', 'doGet', err.toString(), '', e ? JSON.stringify(e.parameter) : '');
+    return createJsonResponse(errorResponse('SERVER_ERROR', err.message || 'Lỗi xử lý yêu cầu GET'));
   }
 }
 
 /**
- * Handle POST requests
- * Input format: { "action": "sessions.create", "data": { ... } }
- * Supports text/plain, application/json, and URL encoded payload
+ * Handle POST requests (Accepts JSON body or text/plain JSON string to avoid CORS issues)
  */
 function doPost(e) {
   try {
-    let action = '';
-    let data = {};
-
+    let requestPayload = {};
     if (e && e.postData && e.postData.contents) {
       try {
-        const body = JSON.parse(e.postData.contents);
-        action = body.action || '';
-        data = body.data || {};
+        requestPayload = JSON.parse(e.postData.contents);
       } catch (parseErr) {
-        // Fallback if sent as form payload
-        if (e.parameter) {
-          action = e.parameter.action || '';
-          if (e.parameter.data) {
-            try {
-              data = JSON.parse(e.parameter.data);
-            } catch (pErr) {
-              data = e.parameter;
-            }
-          } else {
-            data = e.parameter;
-          }
-        }
+        return createJsonResponse(errorResponse('INVALID_JSON', 'Payload không đúng định dạng JSON: ' + parseErr.message));
       }
     } else if (e && e.parameter) {
-      action = e.parameter.action || '';
-      data = e.parameter;
+      requestPayload = e.parameter;
     }
+
+    const action = requestPayload.action ? String(requestPayload.action).trim() : '';
+    const data = requestPayload.data || {};
 
     if (!action) {
-      return errorResponse('INVALID_ACTION', 'Action is required in POST payload');
+      return createJsonResponse(errorResponse('MISSING_ACTION', 'Thiếu trường action trong yêu cầu POST'));
     }
 
-    return handleApiRequest(action, data);
+    const response = handleApiRequest(action, data);
+    return createJsonResponse(response);
   } catch (err) {
-    appendLog('ERROR', 'API', 'doPost', err.toString(), '', e ? e.postData : null);
-    return errorResponse('SERVER_ERROR', err.toString());
+    appendLog('ERROR', 'SYSTEM', 'doPost', err.toString(), '', e && e.postData ? e.postData.contents : '');
+    return createJsonResponse(errorResponse('SERVER_ERROR', err.message || 'Lỗi xử lý yêu cầu POST'));
   }
 }
 
-// ==========================================
-// 3. API ROUTER & WHITELIST
-// ==========================================
-
-function handleApiRequest(action, data) {
-  data = data || {};
-  
-  // Whitelist routing
-  switch (action) {
-    // 1. Settings
-    case 'settings.get':
-      return apiSettingsGet();
-
-    // 2. Games Catalog
-    case 'games.list':
-      return apiGamesList(data);
-    case 'games.get':
-      return apiGamesGet(data);
-
-    // 3. Classes
-    case 'classes.list':
-      return apiClassesList(data);
-    case 'classes.get':
-      return apiClassesGet(data);
-    case 'classes.create':
-      return apiClassesCreate(data);
-    case 'classes.update':
-      return apiClassesUpdate(data);
-    case 'classes.delete':
-      return apiClassesDelete(data);
-
-    // 4. Students
-    case 'students.list':
-      return apiStudentsList(data);
-    case 'students.listByClass':
-      return apiStudentsListByClass(data);
-    case 'students.get':
-      return apiStudentsGet(data);
-    case 'students.create':
-      return apiStudentsCreate(data);
-    case 'students.update':
-      return apiStudentsUpdate(data);
-    case 'students.delete':
-      return apiStudentsDelete(data);
-
-    // 5. Question Banks
-    case 'questionBanks.list':
-      return apiQuestionBanksList(data);
-    case 'questionBanks.get':
-      return apiQuestionBanksGet(data);
-    case 'questionBanks.create':
-      return apiQuestionBanksCreate(data);
-    case 'questionBanks.update':
-      return apiQuestionBanksUpdate(data);
-    case 'questionBanks.delete':
-      return apiQuestionBanksDelete(data);
-
-    // 6. Questions
-    case 'questions.list':
-      return apiQuestionsList(data);
-    case 'questions.listByBank':
-      return apiQuestionsListByBank(data);
-    case 'questions.get':
-      return apiQuestionsGet(data);
-    case 'questions.create':
-      return apiQuestionsCreate(data);
-    case 'questions.update':
-      return apiQuestionsUpdate(data);
-    case 'questions.delete':
-      return apiQuestionsDelete(data);
-
-    // 7. Sessions
-    case 'sessions.create':
-      return apiSessionsCreate(data);
-    case 'sessions.get':
-      return apiSessionsGet(data);
-    case 'sessions.update':
-      return apiSessionsUpdate(data);
-    case 'sessions.finish':
-      return apiSessionsFinish(data);
-    case 'sessions.list':
-      return apiSessionsList(data);
-    case 'sessions.listByClass':
-      return apiSessionsListByClass(data);
-
-    // 8. Teams
-    case 'teams.create':
-      return apiTeamsCreate(data);
-    case 'teams.listBySession':
-      return apiTeamsListBySession(data);
-    case 'teams.update':
-      return apiTeamsUpdate(data);
-    case 'teams.getScore':
-      return apiTeamsGetScore(data);
-
-    // 9. Participants
-    case 'participants.add':
-      return apiParticipantsAdd(data);
-    case 'participants.listBySession':
-      return apiParticipantsListBySession(data);
-    case 'participants.assignTeam':
-      return apiParticipantsAssignTeam(data);
-    case 'participants.remove':
-      return apiParticipantsRemove(data);
-
-    // 10. Scores Engine
-    case 'scores.addEvent':
-      return apiScoresAddEvent(data);
-    case 'scores.getBySession':
-      return apiScoresGetBySession(data);
-    case 'scores.listEvents':
-      return apiScoresListEvents(data);
-
-    // 11. CAM RACE
-    case 'camRace.race.add':
-      return apiCamRaceAdd(data);
-    case 'camRace.answer.add':
-      return apiCamRaceAnswerAdd(data);
-    case 'camRace.result.completeQuestion':
-      return apiCamRaceCompleteQuestion(data);
-    case 'camRace.history.listBySession':
-      return apiCamRaceHistoryList(data);
-
-    // 12. QUIZ BATTLE
-    case 'quiz.answer.add':
-      return apiQuizAnswerAdd(data);
-
-    // 13. FASTEST HAND
-    case 'fastestHand.buzz':
-      return apiFastestHandBuzz(data);
-    case 'fastestHand.answer':
-      return apiFastestHandAnswer(data);
-
-    // 14. LUCKY WHEEL
-    case 'luckyWheel.addSpin':
-      return apiLuckyWheelAddSpin(data);
-    case 'luckyWheel.listHistory':
-      return apiLuckyWheelListHistory(data);
-
-    // 15. RANDOM PICKER
-    case 'randomPicker.addPick':
-      return apiRandomPickerAddPick(data);
-    case 'randomPicker.listHistory':
-      return apiRandomPickerListHistory(data);
-    case 'randomPicker.resetSession':
-      return apiRandomPickerResetSession(data);
-
-    // 16. TEAM CHALLENGE
-    case 'teamChallenge.addScore':
-      return apiTeamChallengeAddScore(data);
-    case 'teamChallenge.getLeaderboard':
-      return apiTeamChallengeGetLeaderboard(data);
-
-    // 17. Game Results & Leaderboard
-    case 'results.create':
-      return apiResultsCreate(data);
-    case 'results.listBySession':
-      return apiResultsListBySession(data);
-    case 'leaderboard.top3':
-      return apiLeaderboardTop3(data);
-
-    // 18. Certificates
-    case 'certificates.create':
-      return apiCertificatesCreate(data);
-    case 'certificates.getBySession':
-      return apiCertificatesGetBySession(data);
-
-    default:
-      return errorResponse('INVALID_ACTION', `Action "${action}" is not supported by EDUPLAY API.`);
-  }
+function createJsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }
-
-// ==========================================
-// 4. RESPONSE HELPERS
-// ==========================================
 
 function successResponse(data, message) {
-  const payload = {
+  return {
     success: true,
     data: data !== undefined ? data : null,
     message: message || 'OK',
     timestamp: getCurrentTimestamp()
   };
-  return ContentService
-    .createTextOutput(JSON.stringify(payload))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function errorResponse(code, message) {
-  const payload = {
+  return {
     success: false,
-    error: code || 'UNKNOWN_ERROR',
-    message: message || 'An error occurred',
+    error: code || 'ERROR',
+    message: message || 'Đã xảy ra lỗi',
     timestamp: getCurrentTimestamp()
   };
-  return ContentService
-    .createTextOutput(JSON.stringify(payload))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // ==========================================
-// 5. DATABASE HELPERS (REUSABLE DATA ACCESS)
+// 4. ROUTER & API WHITELIST
 // ==========================================
 
-function getSheet(name) {
+const API_ACTIONS = {
+  // 1. Settings
+  'settings.get': apiGetSettings,
+
+  // 2. Games Catalog
+  'games.list': apiListGames,
+  'games.get': apiGetGame,
+
+  // 3. Classes CRUD
+  'classes.list': apiListClasses,
+  'classes.get': apiGetClass,
+  'classes.create': apiCreateClass,
+  'classes.update': apiUpdateClass,
+  'classes.delete': apiDeleteClass,
+
+  // 4. Question Banks CRUD
+  'questionBanks.list': apiListQuestionBanks,
+  'questionBanks.get': apiGetQuestionBank,
+  'questionBanks.create': apiCreateQuestionBank,
+  'questionBanks.update': apiUpdateQuestionBank,
+  'questionBanks.delete': apiDeleteQuestionBank,
+
+  // 5. Questions CRUD
+  'questions.list': apiListQuestions,
+  'questions.listByBank': apiListQuestionsByBank,
+  'questions.get': apiGetQuestion,
+  'questions.create': apiCreateQuestion,
+  'questions.update': apiUpdateQuestion,
+  'questions.delete': apiDeleteQuestion,
+
+  // 6. Import Batch
+  'questions.importBatch': apiImportQuestionsBatch,
+  'teams.importBatch': apiImportTeamsBatch,
+  'imports.history.list': apiListImportHistory,
+
+  // 7. Sessions API
+  'sessions.create': apiCreateSession,
+  'sessions.get': apiGetSession,
+  'sessions.update': apiUpdateSession,
+  'sessions.list': apiListSessions,
+  'sessions.listByClass': apiListSessionsByClass,
+  'sessions.finish': apiFinishSession,
+  'sessions.cancel': apiCancelSession,
+
+  // 8. Teams API
+  'teams.create': apiCreateTeam,
+  'teams.createBatch': apiCreateTeamsBatch,
+  'teams.listBySession': apiListTeamsBySession,
+  'teams.get': apiGetTeam,
+  'teams.update': apiUpdateTeam,
+  'teams.delete': apiDeleteTeam,
+  'teams.getScore': apiGetTeamScore,
+  'teams.getLeaderboard': apiGetTeamLeaderboard,
+
+  // 9. Score Ledger Engine
+  'scores.addEvent': apiAddScoreEvent,
+  'scores.listBySession': apiListScoresBySession,
+  'scores.getBySession': apiListScoresBySession,
+  'scores.recalculate': apiRecalculateScores,
+
+  // 10. Cam Race API (2 Teams Blue/Orange, No biometrics)
+  'camRace.race.add': apiCamRaceAddRace,
+  'camRace.answer.add': apiCamRaceAddAnswer,
+  'camRace.question.complete': apiCamRaceCompleteQuestion,
+  'camRace.result.completeQuestion': apiCamRaceCompleteQuestion,
+  'camRace.history.listBySession': apiCamRaceListHistory,
+
+  // 11. Smile Race API (2-4 Teams, Gesture Score only, No Face/Biometrics)
+  'smileRace.gesture.add': apiSmileRaceAddGesture,
+  'smileRace.answer.add': apiSmileRaceAddAnswer,
+  'smileRace.question.complete': apiSmileRaceCompleteQuestion,
+  'smileRace.history.listBySession': apiSmileRaceListHistory,
+
+  // 12. Fastest Hand API (First buzz lock)
+  'fastestHand.buzz': apiFastestHandBuzz,
+  'fastestHand.answer': apiFastestHandAnswer,
+  'fastestHand.question.complete': apiFastestHandCompleteQuestion,
+  'fastestHand.history.listBySession': apiFastestHandListHistory,
+
+  // 13. Lucky Wheel API
+  'luckyWheel.spin.add': apiLuckyWheelAddSpin,
+  'luckyWheel.history.listBySession': apiLuckyWheelListHistory,
+
+  // 14. Random Team Picker API
+  'randomTeam.pick.add': apiRandomTeamAddPick,
+  'randomTeam.history.listBySession': apiRandomTeamListHistory,
+  'randomTeam.resetSession': apiRandomTeamResetSession,
+
+  // 15. Team Challenge API
+  'teamChallenge.answer.add': apiTeamChallengeAddAnswer,
+  'teamChallenge.score.add': apiTeamChallengeAddScore,
+  'teamChallenge.round.complete': apiTeamChallengeCompleteRound,
+  'teamChallenge.history.listBySession': apiTeamChallengeListHistory,
+
+  // 16. Progress & Results & Leaderboard
+  'progress.completeQuestion': apiProgressCompleteQuestion,
+  'results.listBySession': apiListResultsBySession,
+  'results.getWinner': apiGetWinnerBySession,
+  'leaderboard.bySession': apiGetLeaderboardBySession,
+  'leaderboard.top3': apiGetTop3Leaderboard,
+
+  // 17. Certificates (Team-Only)
+  'certificates.create': apiCreateCertificate,
+  'certificates.listBySession': apiListCertificatesBySession,
+  'certificates.get': apiGetCertificate,
+
+  // 18. Logs
+  'appLogs.list': apiListAppLogs
+};
+
+function handleApiRequest(action, data) {
+  if (!Object.prototype.hasOwnProperty.call(API_ACTIONS, action)) {
+    return errorResponse('INVALID_ACTION', `Action '${action}' không nằm trong whitelist của EDUPLAY API.`);
+  }
+
+  try {
+    const handler = API_ACTIONS[action];
+    return handler(data || {});
+  } catch (err) {
+    appendLog('ERROR', 'API', action, err.message || err.toString(), (data && data.sessionId) || '', data);
+    return errorResponse('EXECUTION_ERROR', `Lỗi khi thực thi action '${action}': ${err.message}`);
+  }
+}
+
+// ==========================================
+// 5. DATABASE HELPERS & SANITIZATION
+// ==========================================
+
+function getSheet(sheetName) {
+  if (!EDUPLAY_SCHEMAS[sheetName]) {
+    throw new Error(`Bảng '${sheetName}' không hợp lệ hoặc không thuộc hệ sinh thái EDUPLAY.`);
+  }
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(name);
+  let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
-    throw new Error(`Sheet "${name}" does not exist. Please run setupDatabase() first.`);
+    // Tự động tạo nếu bảng chưa có
+    sheet = getOrCreateSheet(ss, sheetName, EDUPLAY_SCHEMAS[sheetName]);
+    ensureHeaders(sheet, EDUPLAY_SCHEMAS[sheetName]);
+    formatSheetHeader(sheet, EDUPLAY_SCHEMAS[sheetName].length);
   }
   return sheet;
 }
 
 function getHeaders(sheet) {
-  const lastCol = sheet.getLastColumn();
-  if (lastCol === 0) return [];
-  return sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim());
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  return sheet.getRange(1, 1, 1, lastCol).getValues()[0] || [];
 }
 
 function rowToObject(headers, row) {
   const obj = {};
-  headers.forEach((header, idx) => {
-    if (header) {
-      let val = row[idx];
-      // Convert Date object to ISO string
-      if (val instanceof Date) {
-        val = Utilities.formatDate(val, TIMEZONE, "yyyy-MM-dd'T'HH:mm:ssXXX");
-      }
-      obj[header] = val !== undefined ? val : null;
+  for (let i = 0; i < headers.length; i++) {
+    const key = headers[i];
+    if (key) {
+      obj[key] = row[i] !== undefined ? row[i] : null;
     }
-  });
+  }
   return obj;
 }
 
-function objectToRow(headers, object) {
-  return headers.map(header => {
-    const val = object[header];
+function objectToRow(headers, obj) {
+  return headers.map(h => {
+    const val = obj[h];
     if (val === undefined || val === null) return '';
-    if (typeof val === 'boolean') return val;
     if (typeof val === 'object') return JSON.stringify(val);
     return val;
   });
@@ -418,17 +390,15 @@ function findRowById(sheet, id) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return null;
   const headers = getHeaders(sheet);
-  const idColIndex = headers.indexOf('id') + 1;
-  if (idColIndex === 0) return null;
+  const idCol = headers.indexOf('id');
+  if (idCol === -1) return null;
 
-  const idValues = sheet.getRange(2, idColIndex, lastRow - 1, 1).getValues();
-  for (let i = 0; i < idValues.length; i++) {
-    if (String(idValues[i][0]) === String(id)) {
-      const rowIndex = i + 2;
-      const rowData = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
+  const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][idCol]) === String(id)) {
       return {
-        rowIndex: rowIndex,
-        data: rowToObject(headers, rowData)
+        rowIndex: i + 2,
+        data: rowToObject(headers, data[i])
       };
     }
   }
@@ -439,27 +409,37 @@ function findRowsByField(sheet, field, value) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
   const headers = getHeaders(sheet);
-  const colIndex = headers.indexOf(field) + 1;
-  if (colIndex === 0) return [];
+  const colIndex = headers.indexOf(field);
+  if (colIndex === -1) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
   const results = [];
-  const compareStr = String(value);
-
-  for (let i = 0; i < values.length; i++) {
-    const row = values[i];
-    if (String(row[colIndex - 1]) === compareStr) {
-      results.push(rowToObject(headers, row));
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][colIndex]) === String(value)) {
+      results.push({
+        rowIndex: i + 2,
+        data: rowToObject(headers, data[i])
+      });
     }
   }
   return results;
 }
 
-function appendObject(sheet, object) {
+function appendObject(sheet, obj) {
   const headers = getHeaders(sheet);
-  const rowData = objectToRow(headers, object);
-  sheet.appendRow(rowData);
-  return object;
+  if (!obj.id) {
+    const prefix = sheet.getName().toLowerCase().replace(/_/g, '').substring(0, 5);
+    obj.id = generateId(prefix);
+  }
+  if (headers.includes('createdAt') && !obj.createdAt) {
+    obj.createdAt = getCurrentTimestamp();
+  }
+  if (headers.includes('updatedAt') && !obj.updatedAt) {
+    obj.updatedAt = getCurrentTimestamp();
+  }
+  const row = objectToRow(headers, obj);
+  sheet.appendRow(row);
+  return obj;
 }
 
 function updateObjectById(sheet, id, updates) {
@@ -467,16 +447,13 @@ function updateObjectById(sheet, id, updates) {
   if (!found) return null;
 
   const headers = getHeaders(sheet);
-  const updatedObject = Object.assign({}, found.data, updates);
-  // Do NOT allow client to modify 'id'
-  updatedObject.id = id;
-  if (headers.includes('updatedAt') && !updates.updatedAt) {
-    updatedObject.updatedAt = getCurrentTimestamp();
+  const updatedObj = { ...found.data, ...updates };
+  if (headers.includes('updatedAt')) {
+    updatedObj.updatedAt = getCurrentTimestamp();
   }
-
-  const rowData = objectToRow(headers, updatedObject);
-  sheet.getRange(found.rowIndex, 1, 1, headers.length).setValues([rowData]);
-  return updatedObject;
+  const row = objectToRow(headers, updatedObj);
+  sheet.getRange(found.rowIndex, 1, 1, headers.length).setValues([row]);
+  return updatedObj;
 }
 
 function deleteObjectById(sheet, id) {
@@ -486,1442 +463,1838 @@ function deleteObjectById(sheet, id) {
   return true;
 }
 
-function generateId(prefix) {
-  const cleanPrefix = prefix ? (prefix.endsWith('_') ? prefix : prefix + '_') : '';
-  return cleanPrefix + Utilities.getUuid().replace(/-/g, '').substring(0, 16);
+function sanitizeString(val) {
+  if (val === null || val === undefined) return '';
+  return String(val).trim();
 }
-
-function generateSessionCode() {
-  const randNum = Math.floor(1000 + Math.random() * 9000);
-  return `EDU-${randNum}`;
-}
-
-function generateCertificateCode() {
-  const randHex = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const year = new Date().getFullYear();
-  return `EDUPLAY-${year}-${randHex}`;
-}
-
-function getCurrentTimestamp() {
-  return Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd'T'HH:mm:ssXXX");
-}
-
-function appendLog(level, module, action, message, sessionId, payload) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName('APP_LOGS');
-    if (!sheet) return;
-
-    const row = [
-      generateId('log'),
-      level || 'INFO',
-      module || 'GENERAL',
-      action || '',
-      message || '',
-      sessionId || '',
-      typeof payload === 'object' ? JSON.stringify(payload) : (payload || ''),
-      getCurrentTimestamp()
-    ];
-    sheet.appendRow(row);
-  } catch (err) {
-    Logger.log('Error logging: ' + err.toString());
-  }
-}
-
-// ==========================================
-// 6. VALIDATION & SANITIZATION HELPERS
-// ==========================================
 
 function requireFields(data, fields) {
-  const missing = [];
-  fields.forEach(f => {
+  for (const f of fields) {
     if (data[f] === undefined || data[f] === null || data[f] === '') {
-      missing.push(f);
+      throw new Error(`Trường bắt buộc còn thiếu: '${f}'`);
     }
-  });
-  if (missing.length > 0) {
-    throw new Error(`Missing required fields: ${missing.join(', ')}`);
   }
 }
 
-function sanitizeString(val) {
-  if (typeof val !== 'string') return val;
-  return val.trim();
-}
-
-function validateGameSlug(slug) {
-  const validSlugs = ['cam-race', 'quiz-battle', 'lucky-wheel', 'fastest-hand', 'random-picker', 'team-challenge'];
-  if (!validSlugs.includes(slug)) {
-    throw new Error(`Invalid game slug: "${slug}". Must be one of: ${validSlugs.join(', ')}`);
-  }
-  return true;
-}
-
 // ==========================================
-// 7. SETTINGS API
+// 6. API HANDLERS - SETTINGS
 // ==========================================
 
-function apiSettingsGet() {
+function apiGetSettings() {
   const sheet = getSheet('SETTINGS');
   const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) {
-    return successResponse({}, 'Settings empty');
+  const result = {
+    platformName: 'EDUPLAY',
+    platformSubtitle: 'Hệ thống trò chơi tương tác lớp học',
+    defaultLanguage: 'vi',
+    minTeams: 2,
+    maxTeams: 4,
+    defaultQuestionCount: 15,
+    defaultCorrectPoints: 10,
+    defaultSpecialPoints: 20,
+    defaultStealRatio: 0.5,
+    defaultCountdownSeconds: 3,
+    camRaceTieThresholdMs: 200,
+    camRaceFreezeMs: 1500,
+    smileRaceTieThresholdMs: 200,
+    smileRaceGestureThreshold: 0.60,
+    smileRaceStableFrames: 4,
+    smileRaceMaxStealAttempts: 1,
+    fastestHandLockOnFirstBuzz: true
+  };
+
+  if (lastRow > 1) {
+    const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    data.forEach(row => {
+      const key = String(row[0]).trim();
+      let val = row[1];
+      if (val === 'TRUE') val = true;
+      else if (val === 'FALSE') val = false;
+      else if (!isNaN(Number(val)) && val !== '') val = Number(val);
+      if (key) result[key] = val;
+    });
   }
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
-  const settings = {};
-  values.forEach(row => {
-    const key = String(row[0]).trim();
-    let val = row[1];
-    if (val === 'TRUE' || val === true) val = true;
-    else if (val === 'FALSE' || val === false) val = false;
-    else if (!isNaN(Number(val)) && val !== '') val = Number(val);
-    if (key) settings[key] = val;
-  });
-
-  return successResponse(settings, 'Settings loaded successfully');
+  return successResponse(result);
 }
 
 // ==========================================
-// 8. GAME CATALOG API
+// 7. API HANDLERS - GAME CATALOG
 // ==========================================
 
-function apiGamesList(data) {
+function apiListGames() {
   const sheet = getSheet('GAME_CATALOG');
-  const headers = getHeaders(sheet);
   const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return successResponse([], 'No games');
+  if (lastRow <= 1) return successResponse([]);
 
-  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  const games = rows
-    .map(r => rowToObject(headers, r))
-    .filter(g => g.enabled === true || g.enabled === 'TRUE' || String(g.enabled).toLowerCase() === 'true')
-    .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+  const headers = getHeaders(sheet);
+  const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const games = data
+    .map(row => rowToObject(headers, row))
+    .filter(g => g.enabled === true || String(g.enabled).toUpperCase() === 'TRUE')
+    .sort((a, b) => (Number(a.sortOrder) || 99) - (Number(b.sortOrder) || 99));
 
-  return successResponse(games, 'Games loaded');
+  return successResponse(games);
 }
 
-function apiGamesGet(data) {
+function apiGetGame(data) {
   requireFields(data, ['slug']);
   const sheet = getSheet('GAME_CATALOG');
-  const rows = findRowsByField(sheet, 'slug', data.slug);
-  if (rows.length === 0) {
-    return errorResponse('GAME_NOT_FOUND', `Game with slug "${data.slug}" not found`);
+  const found = findRowsByField(sheet, 'slug', data.slug);
+  if (found.length === 0) {
+    return errorResponse('GAME_NOT_FOUND', `Không tìm thấy trò chơi với slug: ${data.slug}`);
   }
-  return successResponse(rows[0], 'Game loaded');
+  return successResponse(found[0].data);
 }
 
 // ==========================================
-// 9. CLASSES CRUD API
+// 8. API HANDLERS - CLASSES CRUD
 // ==========================================
 
-function apiClassesList(data) {
+function apiListClasses() {
   const sheet = getSheet('CLASSES');
-  const headers = getHeaders(sheet);
   const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return successResponse([], 'No classes');
-
-  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  const classes = rows
-    .map(r => rowToObject(headers, r))
-    .filter(c => c.enabled !== false && String(c.enabled).toLowerCase() !== 'false');
-
-  return successResponse(classes, 'Classes loaded');
+  if (lastRow <= 1) return successResponse([]);
+  const headers = getHeaders(sheet);
+  const list = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues()
+    .map(row => rowToObject(headers, row));
+  return successResponse(list);
 }
 
-function apiClassesGet(data) {
+function apiGetClass(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('CLASSES');
   const found = findRowById(sheet, data.id);
-  if (!found) return errorResponse('CLASS_NOT_FOUND', `Class id ${data.id} not found`);
-  return successResponse(found.data, 'Class loaded');
+  if (!found) return errorResponse('CLASS_NOT_FOUND', 'Không tìm thấy lớp học');
+  return successResponse(found.data);
 }
 
-function apiClassesCreate(data) {
-  requireFields(data, ['className', 'grade']);
+function apiCreateClass(data) {
+  requireFields(data, ['className']);
   const sheet = getSheet('CLASSES');
-
   const newClass = {
     id: generateId('class'),
-    classCode: data.classCode || sanitizeString(data.className),
+    classCode: sanitizeString(data.classCode) || `CLS-${Math.floor(1000 + Math.random() * 9000)}`,
     className: sanitizeString(data.className),
-    grade: Number(data.grade) || 5,
-    schoolYear: data.schoolYear || '2025-2026',
-    teacherName: data.teacherName || 'Giáo viên',
-    schoolName: data.schoolName || 'Trường Tiểu học EDUPLAY',
-    subject: data.subject || 'Tin học',
-    studentCount: Number(data.studentCount) || 0,
-    enabled: data.enabled !== undefined ? data.enabled : true,
+    grade: data.grade || 5,
+    schoolYear: sanitizeString(data.schoolYear) || '2025-2026',
+    teacherName: sanitizeString(data.teacherName) || '',
+    schoolName: sanitizeString(data.schoolName) || '',
+    subject: sanitizeString(data.subject) || 'Tin học',
+    enabled: data.enabled !== undefined ? Boolean(data.enabled) : true,
     createdAt: getCurrentTimestamp(),
     updatedAt: getCurrentTimestamp()
   };
-
   appendObject(sheet, newClass);
-  appendLog('INFO', 'CLASSES', 'CREATE', `Created class ${newClass.className}`, '', newClass);
-  return successResponse(newClass, 'Class created successfully');
+  return successResponse(newClass, 'Đã tạo lớp học thành công');
 }
 
-function apiClassesUpdate(data) {
+function apiUpdateClass(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('CLASSES');
   const updated = updateObjectById(sheet, data.id, data);
-  if (!updated) return errorResponse('CLASS_NOT_FOUND', `Class id ${data.id} not found`);
-  return successResponse(updated, 'Class updated successfully');
+  if (!updated) return errorResponse('CLASS_NOT_FOUND', 'Không tìm thấy lớp học');
+  return successResponse(updated, 'Đã cập nhật thông tin lớp học');
 }
 
-function apiClassesDelete(data) {
+function apiDeleteClass(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('CLASSES');
-  const success = deleteObjectById(sheet, data.id);
-  if (!success) return errorResponse('CLASS_NOT_FOUND', `Class id ${data.id} not found`);
-  return successResponse({ deletedId: data.id }, 'Class deleted successfully');
+  const deleted = deleteObjectById(sheet, data.id);
+  if (!deleted) return errorResponse('CLASS_NOT_FOUND', 'Không tìm thấy lớp học để xóa');
+  return successResponse({ deleted: true }, 'Đã xóa lớp học');
 }
 
 // ==========================================
-// 10. STUDENTS CRUD API
+// 9. API HANDLERS - QUESTION BANKS CRUD
 // ==========================================
 
-function apiStudentsList(data) {
-  const sheet = getSheet('STUDENTS');
-  const headers = getHeaders(sheet);
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return successResponse([], 'No students');
-
-  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  const students = rows.map(r => rowToObject(headers, r));
-  return successResponse(students, 'Students loaded');
-}
-
-function apiStudentsListByClass(data) {
-  requireFields(data, ['classId']);
-  const sheet = getSheet('STUDENTS');
-  const students = findRowsByField(sheet, 'classId', data.classId)
-    .filter(s => s.enabled !== false && String(s.enabled).toLowerCase() !== 'false');
-  return successResponse(students, `Loaded ${students.length} students for class ${data.classId}`);
-}
-
-function apiStudentsGet(data) {
-  requireFields(data, ['id']);
-  const sheet = getSheet('STUDENTS');
-  const found = findRowById(sheet, data.id);
-  if (!found) return errorResponse('STUDENT_NOT_FOUND', `Student id ${data.id} not found`);
-  return successResponse(found.data, 'Student loaded');
-}
-
-function apiStudentsCreate(data) {
-  requireFields(data, ['classId', 'fullName']);
-  const sheet = getSheet('STUDENTS');
-
-  const newStudent = {
-    id: generateId('st'),
-    classId: data.classId,
-    studentCode: data.studentCode || `HS_${Date.now().toString().substring(8)}`,
-    fullName: sanitizeString(data.fullName),
-    displayName: sanitizeString(data.displayName || data.fullName),
-    groupName: data.groupName || 'Tổ 1',
-    teamPreference: data.teamPreference || 'BLUE',
-    enabled: data.enabled !== undefined ? data.enabled : true,
-    createdAt: getCurrentTimestamp(),
-    updatedAt: getCurrentTimestamp()
-  };
-
-  appendObject(sheet, newStudent);
-  return successResponse(newStudent, 'Student created successfully');
-}
-
-function apiStudentsUpdate(data) {
-  requireFields(data, ['id']);
-  const sheet = getSheet('STUDENTS');
-  const updated = updateObjectById(sheet, data.id, data);
-  if (!updated) return errorResponse('STUDENT_NOT_FOUND', `Student id ${data.id} not found`);
-  return successResponse(updated, 'Student updated successfully');
-}
-
-function apiStudentsDelete(data) {
-  requireFields(data, ['id']);
-  const sheet = getSheet('STUDENTS');
-  const success = deleteObjectById(sheet, data.id);
-  if (!success) return errorResponse('STUDENT_NOT_FOUND', `Student id ${data.id} not found`);
-  return successResponse({ deletedId: data.id }, 'Student deleted successfully');
-}
-
-// ==========================================
-// 11. QUESTION BANKS CRUD API
-// ==========================================
-
-function apiQuestionBanksList(data) {
+function apiListQuestionBanks() {
   const sheet = getSheet('QUESTION_BANKS');
-  const headers = getHeaders(sheet);
   const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return successResponse([], 'No question banks');
-
-  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  const banks = rows.map(r => rowToObject(headers, r));
-  return successResponse(banks, 'Question banks loaded');
+  if (lastRow <= 1) return successResponse([]);
+  const headers = getHeaders(sheet);
+  const list = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues()
+    .map(row => rowToObject(headers, row));
+  return successResponse(list);
 }
 
-function apiQuestionBanksGet(data) {
+function apiGetQuestionBank(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('QUESTION_BANKS');
   const found = findRowById(sheet, data.id);
-  if (!found) return errorResponse('BANK_NOT_FOUND', `Bank id ${data.id} not found`);
-  return successResponse(found.data, 'Question bank loaded');
+  if (!found) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
+  return successResponse(found.data);
 }
 
-function apiQuestionBanksCreate(data) {
-  requireFields(data, ['name', 'subject']);
+function apiCreateQuestionBank(data) {
+  requireFields(data, ['name']);
   const sheet = getSheet('QUESTION_BANKS');
-
-  const newBank = {
+  const bank = {
     id: generateId('bank'),
+    bankCode: sanitizeString(data.bankCode) || `BANK_${Math.floor(1000 + Math.random() * 9000)}`,
     name: sanitizeString(data.name),
-    subject: sanitizeString(data.subject),
+    subject: sanitizeString(data.subject) || 'Tin học',
     grade: Number(data.grade) || 5,
-    topic: data.topic || '',
-    description: data.description || '',
-    questionCount: Number(data.questionCount) || 0,
-    enabled: data.enabled !== undefined ? data.enabled : true,
+    topic: sanitizeString(data.topic) || '',
+    description: sanitizeString(data.description) || '',
+    questionCount: 0,
+    enabled: true,
     createdAt: getCurrentTimestamp(),
     updatedAt: getCurrentTimestamp()
   };
-
-  appendObject(sheet, newBank);
-  return successResponse(newBank, 'Question bank created');
+  appendObject(sheet, bank);
+  return successResponse(bank, 'Đã tạo ngân hàng câu hỏi mới');
 }
 
-function apiQuestionBanksUpdate(data) {
+function apiUpdateQuestionBank(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('QUESTION_BANKS');
   const updated = updateObjectById(sheet, data.id, data);
-  if (!updated) return errorResponse('BANK_NOT_FOUND', `Bank id ${data.id} not found`);
-  return successResponse(updated, 'Question bank updated');
+  if (!updated) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
+  return successResponse(updated, 'Đã cập nhật ngân hàng câu hỏi');
 }
 
-function apiQuestionBanksDelete(data) {
+function apiDeleteQuestionBank(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('QUESTION_BANKS');
-  const success = deleteObjectById(sheet, data.id);
-  if (!success) return errorResponse('BANK_NOT_FOUND', `Bank id ${data.id} not found`);
-  return successResponse({ deletedId: data.id }, 'Question bank deleted');
+  const deleted = deleteObjectById(sheet, data.id);
+  if (!deleted) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng để xóa');
+  return successResponse({ deleted: true }, 'Đã xóa ngân hàng câu hỏi');
 }
 
 // ==========================================
-// 12. QUESTIONS CRUD API
+// 10. API HANDLERS - QUESTIONS CRUD
 // ==========================================
 
-function formatQuestionOutput(q) {
-  // Convert 0, 1, 2, 3 or A, B, C, D to standard letter
-  let ansLetter = 'A';
-  if (q.correctAnswer === 0 || q.correctAnswer === '0' || q.correctAnswer === 'A') ansLetter = 'A';
-  else if (q.correctAnswer === 1 || q.correctAnswer === '1' || q.correctAnswer === 'B') ansLetter = 'B';
-  else if (q.correctAnswer === 2 || q.correctAnswer === '2' || q.correctAnswer === 'C') ansLetter = 'C';
-  else if (q.correctAnswer === 3 || q.correctAnswer === '3' || q.correctAnswer === 'D') ansLetter = 'D';
-
+function formatQuestionResponse(q) {
   return {
     id: q.id,
     bankId: q.bankId,
     order: Number(q.order) || 1,
+    subject: q.subject,
+    grade: Number(q.grade) || 5,
+    topic: q.topic,
     questionType: q.questionType || 'multiple_choice',
     question: q.question,
     options: {
-      A: q.optionA,
-      B: q.optionB,
-      C: q.optionC,
-      D: q.optionD
+      A: q.optionA || '',
+      B: q.optionB || '',
+      C: q.optionC || '',
+      D: q.optionD || ''
     },
-    // Array format for easy client UI binding
-    optionsList: [q.optionA, q.optionB, q.optionC, q.optionD],
-    correctAnswer: ansLetter,
-    correctAnswerIndex: ansLetter === 'A' ? 0 : (ansLetter === 'B' ? 1 : (ansLetter === 'C' ? 2 : 3)),
+    correctAnswer: q.correctAnswer || 'A',
     explanation: q.explanation || '',
     difficulty: q.difficulty || 'MEDIUM',
     normalPoints: Number(q.normalPoints) || 10,
-    stealPoints: Number(q.stealPoints) || 5,
     specialPoints: Number(q.specialPoints) || 20,
-    isSpecial: q.isSpecial === true || q.isSpecial === 'TRUE' || String(q.isSpecial).toLowerCase() === 'true',
+    isSpecial: q.isSpecial === true || String(q.isSpecial).toUpperCase() === 'TRUE',
+    enabled: q.enabled !== false && String(q.enabled).toUpperCase() !== 'FALSE',
     tags: q.tags || ''
   };
 }
 
-function apiQuestionsList(data) {
+function apiListQuestions(data) {
   const sheet = getSheet('QUESTIONS');
-  const headers = getHeaders(sheet);
   const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return successResponse([], 'No questions');
-
+  if (lastRow <= 1) return successResponse([]);
+  const headers = getHeaders(sheet);
   const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  const questions = rows
-    .map(r => rowToObject(headers, r))
-    .filter(q => q.enabled !== false && String(q.enabled).toLowerCase() !== 'false')
-    .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
-    .map(formatQuestionOutput);
-
-  return successResponse(questions, 'Questions loaded');
+  const list = rows
+    .map(r => formatQuestionResponse(rowToObject(headers, r)))
+    .filter(q => q.enabled);
+  return successResponse(list);
 }
 
-function apiQuestionsListByBank(data) {
+function apiListQuestionsByBank(data) {
   requireFields(data, ['bankId']);
   const sheet = getSheet('QUESTIONS');
-  const rows = findRowsByField(sheet, 'bankId', data.bankId)
-    .filter(q => q.enabled !== false && String(q.enabled).toLowerCase() !== 'false')
-    .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
-    .map(formatQuestionOutput);
-
-  return successResponse(rows, `Loaded ${rows.length} questions for bank ${data.bankId}`);
+  const found = findRowsByField(sheet, 'bankId', data.bankId);
+  const questions = found
+    .map(f => formatQuestionResponse(f.data))
+    .filter(q => q.enabled)
+    .sort((a, b) => a.order - b.order);
+  return successResponse(questions);
 }
 
-function apiQuestionsGet(data) {
+function apiGetQuestion(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('QUESTIONS');
   const found = findRowById(sheet, data.id);
-  if (!found) return errorResponse('QUESTION_NOT_FOUND', `Question id ${data.id} not found`);
-  return successResponse(formatQuestionOutput(found.data), 'Question loaded');
+  if (!found) return errorResponse('QUESTION_NOT_FOUND', 'Không tìm thấy câu hỏi');
+  return successResponse(formatQuestionResponse(found.data));
 }
 
-function apiQuestionsCreate(data) {
-  requireFields(data, ['bankId', 'question', 'optionA', 'optionB', 'correctAnswer']);
+function apiCreateQuestion(data) {
+  requireFields(data, ['bankId', 'question', 'correctAnswer']);
   const sheet = getSheet('QUESTIONS');
-
-  const newQuestion = {
+  const q = {
     id: generateId('q'),
     bankId: data.bankId,
     order: Number(data.order) || 1,
-    subject: data.subject || 'Tin học',
+    subject: sanitizeString(data.subject) || 'Tin học',
     grade: Number(data.grade) || 5,
-    topic: data.topic || 'Kiến thức',
+    topic: sanitizeString(data.topic) || '',
     questionType: data.questionType || 'multiple_choice',
     question: sanitizeString(data.question),
-    optionA: sanitizeString(data.optionA),
-    optionB: sanitizeString(data.optionB),
-    optionC: sanitizeString(data.optionC || ''),
-    optionD: sanitizeString(data.optionD || ''),
-    correctAnswer: data.correctAnswer,
-    explanation: data.explanation || '',
+    optionA: sanitizeString(data.optionA || (data.options && data.options.A)),
+    optionB: sanitizeString(data.optionB || (data.options && data.options.B)),
+    optionC: sanitizeString(data.optionC || (data.options && data.options.C)),
+    optionD: sanitizeString(data.optionD || (data.options && data.options.D)),
+    correctAnswer: String(data.correctAnswer).trim().toUpperCase(),
+    explanation: sanitizeString(data.explanation),
     difficulty: data.difficulty || 'MEDIUM',
     normalPoints: Number(data.normalPoints) || 10,
-    stealPoints: Number(data.stealPoints) || 5,
     specialPoints: Number(data.specialPoints) || 20,
-    isSpecial: data.isSpecial !== undefined ? data.isSpecial : false,
-    enabled: data.enabled !== undefined ? data.enabled : true,
-    tags: data.tags || '',
+    isSpecial: Boolean(data.isSpecial),
+    enabled: true,
+    tags: sanitizeString(data.tags),
     createdAt: getCurrentTimestamp(),
     updatedAt: getCurrentTimestamp()
   };
-
-  appendObject(sheet, newQuestion);
-  return successResponse(formatQuestionOutput(newQuestion), 'Question created');
+  appendObject(sheet, q);
+  return successResponse(formatQuestionResponse(q), 'Đã thêm câu hỏi mới');
 }
 
-function apiQuestionsUpdate(data) {
+function apiUpdateQuestion(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('QUESTIONS');
-  const updated = updateObjectById(sheet, data.id, data);
-  if (!updated) return errorResponse('QUESTION_NOT_FOUND', `Question id ${data.id} not found`);
-  return successResponse(formatQuestionOutput(updated), 'Question updated');
+  const updates = { ...data };
+  if (data.options) {
+    if (data.options.A !== undefined) updates.optionA = data.options.A;
+    if (data.options.B !== undefined) updates.optionB = data.options.B;
+    if (data.options.C !== undefined) updates.optionC = data.options.C;
+    if (data.options.D !== undefined) updates.optionD = data.options.D;
+  }
+  const updated = updateObjectById(sheet, data.id, updates);
+  if (!updated) return errorResponse('QUESTION_NOT_FOUND', 'Không tìm thấy câu hỏi');
+  return successResponse(formatQuestionResponse(updated), 'Đã cập nhật câu hỏi');
 }
 
-function apiQuestionsDelete(data) {
+function apiDeleteQuestion(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('QUESTIONS');
-  const success = deleteObjectById(sheet, data.id);
-  if (!success) return errorResponse('QUESTION_NOT_FOUND', `Question id ${data.id} not found`);
-  return successResponse({ deletedId: data.id }, 'Question deleted');
+  const deleted = deleteObjectById(sheet, data.id);
+  if (!deleted) return errorResponse('QUESTION_NOT_FOUND', 'Không tìm thấy câu hỏi');
+  return successResponse({ deleted: true }, 'Đã xóa câu hỏi');
 }
 
 // ==========================================
-// 13. GAME SESSIONS API
+// 11. API HANDLERS - IMPORT BATCH
 // ==========================================
 
-function apiSessionsCreate(data) {
-  requireFields(data, ['gameSlug']);
-  validateGameSlug(data.gameSlug);
+function apiImportQuestionsBatch(data) {
+  requireFields(data, ['bankId', 'rows']);
+  const bankId = data.bankId;
+  const mode = data.mode || 'CREATE';
+  const rows = Array.isArray(data.rows) ? data.rows : [];
 
-  const sheet = getSheet('GAME_SESSIONS');
-  const sessionId = generateId('ses');
-  const sessionCode = generateSessionCode();
+  const sheet = getSheet('QUESTIONS');
+  const historySheet = getSheet('IMPORT_HISTORY');
 
-  const newSession = {
-    id: sessionId,
-    sessionCode: sessionCode,
-    gameId: data.gameId || `game_${data.gameSlug}`,
-    gameSlug: data.gameSlug,
-    activityName: data.activityName || 'Tiết học EDUPLAY',
-    classId: data.classId || 'class_5a_demo',
-    className: data.className || 'Lớp 5A',
-    teacherName: data.teacherName || 'Thầy/Cô Giáo',
-    subject: data.subject || 'Tin học',
-    grade: data.grade || 5,
-    questionBankId: data.questionBankId || 'bank_tinhoc5_demo',
-    status: data.status || 'PLAYING',
-    currentRound: 1,
-    currentQuestion: 1,
-    totalQuestions: Number(data.totalQuestions) || 15,
-    startedAt: getCurrentTimestamp(),
-    finishedAt: '',
-    winnerTeamId: '',
-    winnerName: '',
-    createdAt: getCurrentTimestamp(),
-    updatedAt: getCurrentTimestamp()
-  };
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  let failed = 0;
+  const errors = [];
 
-  appendObject(sheet, newSession);
-  appendLog('INFO', 'SESSION', 'SESSION_CREATED', `Session ${sessionCode} created for ${data.gameSlug}`, sessionId, newSession);
+  rows.forEach((r, idx) => {
+    try {
+      if (!r.question || !r.correctAnswer) {
+        failed++;
+        errors.push(`Dòng ${idx + 1}: Thiếu nội dung câu hỏi hoặc đáp án đúng.`);
+        return;
+      }
 
-  // If Cam Race, automatically create default BLUE & ORANGE teams
-  if (data.gameSlug === 'cam-race') {
-    const teamSheet = getSheet('TEAMS');
-    const blueTeam = {
-      id: generateId('tm'),
-      sessionId: sessionId,
-      teamCode: 'BLUE',
-      teamName: data.blueTeamName || 'BLUE TECH',
-      teamColor: '#2563eb',
-      score: 0,
-      rank: 1,
-      raceWins: 0,
-      correctAnswers: 0,
-      wrongAnswers: 0,
-      stealWins: 0,
-      specialCorrect: 0,
-      createdAt: getCurrentTimestamp(),
-      updatedAt: getCurrentTimestamp()
-    };
-    const orangeTeam = {
-      id: generateId('tm'),
-      sessionId: sessionId,
-      teamCode: 'ORANGE',
-      teamName: data.orangeTeamName || 'ORANGE FIRE',
-      teamColor: '#ea580c',
-      score: 0,
-      rank: 1,
-      raceWins: 0,
-      correctAnswers: 0,
-      wrongAnswers: 0,
-      stealWins: 0,
-      specialCorrect: 0,
-      createdAt: getCurrentTimestamp(),
-      updatedAt: getCurrentTimestamp()
-    };
-    appendObject(teamSheet, blueTeam);
-    appendObject(teamSheet, orangeTeam);
-  }
+      const qText = sanitizeString(r.question);
+      const existing = findRowsByField(sheet, 'question', qText);
 
-  return successResponse(newSession, 'Game session created successfully');
-}
-
-function apiSessionsGet(data) {
-  requireFields(data, ['id']);
-  const sheet = getSheet('GAME_SESSIONS');
-  const found = findRowById(sheet, data.id);
-  if (!found) return errorResponse('SESSION_NOT_FOUND', `Session ${data.id} not found`);
-
-  // Load associated teams
-  const teamSheet = getSheet('TEAMS');
-  const teams = findRowsByField(teamSheet, 'sessionId', data.id);
-
-  const res = Object.assign({}, found.data, { teams: teams });
-  return successResponse(res, 'Session loaded');
-}
-
-function apiSessionsUpdate(data) {
-  requireFields(data, ['id']);
-  const sheet = getSheet('GAME_SESSIONS');
-  const updated = updateObjectById(sheet, data.id, data);
-  if (!updated) return errorResponse('SESSION_NOT_FOUND', `Session ${data.id} not found`);
-  return successResponse(updated, 'Session updated');
-}
-
-function apiSessionsList(data) {
-  const sheet = getSheet('GAME_SESSIONS');
-  const headers = getHeaders(sheet);
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return successResponse([], 'No sessions');
-
-  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  const sessions = rows
-    .map(r => rowToObject(headers, r))
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 50); // limit 50 recent
-
-  return successResponse(sessions, 'Sessions loaded');
-}
-
-function apiSessionsListByClass(data) {
-  requireFields(data, ['classId']);
-  const sheet = getSheet('GAME_SESSIONS');
-  const sessions = findRowsByField(sheet, 'classId', data.classId);
-  return successResponse(sessions, `Loaded ${sessions.length} sessions for class`);
-}
-
-/**
- * Finish a session with concurrency lock, score tallying, and game results generation
- */
-function apiSessionsFinish(data) {
-  requireFields(data, ['id']);
-  const sessionId = data.id;
-
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(15000); // 15 seconds lock
-
-    const sessionSheet = getSheet('GAME_SESSIONS');
-    const sessionRow = findRowById(sessionSheet, sessionId);
-    if (!sessionRow) return errorResponse('SESSION_NOT_FOUND', 'Session not found');
-
-    // 1. Get teams and sort by score
-    const teamSheet = getSheet('TEAMS');
-    const teams = findRowsByField(teamSheet, 'sessionId', sessionId);
-
-    teams.sort((a, b) => {
-      const scoreDiff = (Number(b.score) || 0) - (Number(a.score) || 0);
-      if (scoreDiff !== 0) return scoreDiff;
-      return (Number(b.correctAnswers) || 0) - (Number(a.correctAnswers) || 0);
-    });
-
-    // 2. Rank teams & update results
-    const resultsSheet = getSheet('GAME_RESULTS');
-    const resultsCreated = [];
-
-    teams.forEach((t, idx) => {
-      const rank = idx + 1;
-      const isWinner = rank === 1;
-
-      // Update team rank
-      updateObjectById(teamSheet, t.id, { rank: rank });
-
-      // Create GAME_RESULTS record
-      const resultObj = {
-        id: generateId('res'),
-        sessionId: sessionId,
-        gameSlug: sessionRow.data.gameSlug,
-        teamId: t.id,
-        teamName: t.teamName,
-        finalScore: Number(t.score) || 0,
-        rank: rank,
-        correctAnswers: Number(t.correctAnswers) || 0,
-        wrongAnswers: Number(t.wrongAnswers) || 0,
-        bonusPoints: 0,
-        winner: isWinner,
-        statsJson: JSON.stringify({
-          raceWins: t.raceWins || 0,
-          stealWins: t.stealWins || 0,
-          specialCorrect: t.specialCorrect || 0
-        }),
-        createdAt: getCurrentTimestamp()
-      };
-      appendObject(resultsSheet, resultObj);
-      resultsCreated.push(resultObj);
-    });
-
-    const winner = teams.length > 0 ? teams[0] : null;
-
-    // 3. Mark session FINISHED
-    const updatedSession = updateObjectById(sessionSheet, sessionId, {
-      status: 'FINISHED',
-      finishedAt: getCurrentTimestamp(),
-      winnerTeamId: winner ? winner.id : '',
-      winnerName: winner ? winner.teamName : ''
-    });
-
-    appendLog('INFO', 'SESSION', 'SESSION_FINISHED', `Session ${sessionId} completed. Winner: ${winner ? winner.teamName : 'None'}`, sessionId, {
-      winner: winner,
-      scores: teams.map(t => ({ team: t.teamName, score: t.score }))
-    });
-
-    return successResponse({
-      session: updatedSession,
-      winner: winner,
-      teams: teams,
-      results: resultsCreated
-    }, 'Session finished successfully');
-
-  } catch (lockErr) {
-    return errorResponse('LOCK_TIMEOUT', 'Server busy finalizing session. Please retry: ' + lockErr.toString());
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// ==========================================
-// 14. TEAMS API
-// ==========================================
-
-function apiTeamsCreate(data) {
-  requireFields(data, ['sessionId', 'teamCode', 'teamName']);
-  const sheet = getSheet('TEAMS');
-
-  const newTeam = {
-    id: generateId('tm'),
-    sessionId: data.sessionId,
-    teamCode: data.teamCode.toUpperCase(),
-    teamName: sanitizeString(data.teamName),
-    teamColor: data.teamColor || '#3b82f6',
-    score: Number(data.score) || 0,
-    rank: 1,
-    raceWins: 0,
-    correctAnswers: 0,
-    wrongAnswers: 0,
-    stealWins: 0,
-    specialCorrect: 0,
-    createdAt: getCurrentTimestamp(),
-    updatedAt: getCurrentTimestamp()
-  };
-
-  appendObject(sheet, newTeam);
-  return successResponse(newTeam, 'Team created');
-}
-
-function apiTeamsListBySession(data) {
-  requireFields(data, ['sessionId']);
-  const sheet = getSheet('TEAMS');
-  const teams = findRowsByField(sheet, 'sessionId', data.sessionId)
-    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
-  return successResponse(teams, 'Teams loaded');
-}
-
-function apiTeamsUpdate(data) {
-  requireFields(data, ['id']);
-  const sheet = getSheet('TEAMS');
-  const updated = updateObjectById(sheet, data.id, data);
-  if (!updated) return errorResponse('TEAM_NOT_FOUND', `Team id ${data.id} not found`);
-  return successResponse(updated, 'Team updated');
-}
-
-function apiTeamsGetScore(data) {
-  requireFields(data, ['sessionId']);
-  const sheet = getSheet('TEAMS');
-  const teams = findRowsByField(sheet, 'sessionId', data.sessionId);
-  const scoreMap = {};
-  teams.forEach(t => {
-    scoreMap[t.teamCode] = Number(t.score) || 0;
-  });
-  return successResponse(scoreMap, 'Scores retrieved');
-}
-
-// ==========================================
-// 15. PARTICIPANTS API
-// ==========================================
-
-function apiParticipantsAdd(data) {
-  requireFields(data, ['sessionId', 'studentId', 'studentName']);
-  const sheet = getSheet('PARTICIPANTS');
-
-  const newPart = {
-    id: generateId('part'),
-    sessionId: data.sessionId,
-    studentId: data.studentId,
-    studentName: sanitizeString(data.studentName),
-    teamId: data.teamId || '',
-    teamCode: data.teamCode || '',
-    participationOrder: Number(data.participationOrder) || 1,
-    timesSelected: 0,
-    score: 0,
-    createdAt: getCurrentTimestamp(),
-    updatedAt: getCurrentTimestamp()
-  };
-
-  appendObject(sheet, newPart);
-  return successResponse(newPart, 'Participant added');
-}
-
-function apiParticipantsListBySession(data) {
-  requireFields(data, ['sessionId']);
-  const sheet = getSheet('PARTICIPANTS');
-  const participants = findRowsByField(sheet, 'sessionId', data.sessionId);
-  return successResponse(participants, 'Participants loaded');
-}
-
-function apiParticipantsAssignTeam(data) {
-  requireFields(data, ['id', 'teamId', 'teamCode']);
-  const sheet = getSheet('PARTICIPANTS');
-  const updated = updateObjectById(sheet, data.id, {
-    teamId: data.teamId,
-    teamCode: data.teamCode
-  });
-  if (!updated) return errorResponse('PARTICIPANT_NOT_FOUND', 'Participant not found');
-  return successResponse(updated, 'Participant assigned to team');
-}
-
-function apiParticipantsRemove(data) {
-  requireFields(data, ['id']);
-  const sheet = getSheet('PARTICIPANTS');
-  const success = deleteObjectById(sheet, data.id);
-  if (!success) return errorResponse('PARTICIPANT_NOT_FOUND', 'Participant not found');
-  return successResponse({ deletedId: data.id }, 'Participant removed');
-}
-
-// ==========================================
-// 16. SHARED SCORE ENGINE & EVENT DEDUPLICATION
-// ==========================================
-
-/**
- * Server-side score calculator rule engine
- */
-function calculateScore(gameSlug, eventType, question, customPoints) {
-  const isSpecial = question ? (question.isSpecial === true || String(question.isSpecial).toLowerCase() === 'true') : false;
-  const normalPoints = question ? (Number(question.normalPoints) || 10) : 10;
-  const specialPoints = question ? (Number(question.specialPoints) || 20) : 20;
-  const stealPoints = question ? (Number(question.stealPoints) || 5) : 5;
-
-  switch (eventType) {
-    case 'CORRECT':
-    case 'RACE_CORRECT':
-      return isSpecial ? specialPoints : normalPoints;
-    case 'SPECIAL_CORRECT':
-      return specialPoints;
-    case 'STEAL_CORRECT':
-      return stealPoints;
-    case 'WRONG':
-    case 'RACE_WRONG':
-    case 'STEAL_WRONG':
-      return 0;
-    case 'BONUS':
-    case 'WHEEL_REWARD':
-      return Number(customPoints) || 10;
-    case 'PENALTY':
-      return -Math.abs(Number(customPoints) || 5);
-    case 'MANUAL_ADJUSTMENT':
-      return Number(customPoints) || 0;
-    default:
-      return Number(customPoints) || 0;
-  }
-}
-
-/**
- * Generic Score Event with LockService and Deduplication
- */
-function apiScoresAddEvent(data) {
-  requireFields(data, ['sessionId', 'gameSlug', 'teamCode', 'eventType']);
-
-  const eventKey = data.eventKey || `${data.sessionId}_${data.questionId || 'rnd'}_${data.teamCode}_${data.eventType}`;
-  const lock = LockService.getScriptLock();
-
-  try {
-    lock.waitLock(10000); // 10 seconds lock
-
-    const scoreSheet = getSheet('SCORE_EVENTS');
-
-    // Anti-duplicate check using eventKey
-    const existingEvents = findRowsByField(scoreSheet, 'eventKey', eventKey);
-    if (existingEvents.length > 0) {
-      return errorResponse('DUPLICATE_SCORE_EVENT', 'Sự kiện điểm đã được ghi nhận trước đó.');
-    }
-
-    // Determine points
-    let points = 0;
-    if (data.questionId) {
-      const qSheet = getSheet('QUESTIONS');
-      const qRow = findRowById(qSheet, data.questionId);
-      points = calculateScore(data.gameSlug, data.eventType, qRow ? qRow.data : null, data.points);
-    } else {
-      points = calculateScore(data.gameSlug, data.eventType, null, data.points);
-    }
-
-    // 1. Record score event
-    const eventObj = {
-      id: generateId('evt'),
-      sessionId: data.sessionId,
-      gameSlug: data.gameSlug,
-      roundNumber: Number(data.roundNumber) || 1,
-      questionId: data.questionId || '',
-      teamId: data.teamId || '',
-      teamCode: data.teamCode,
-      studentId: data.studentId || '',
-      eventType: data.eventType,
-      points: points,
-      eventKey: eventKey,
-      note: data.note || '',
-      createdAt: getCurrentTimestamp()
-    };
-    appendObject(scoreSheet, eventObj);
-
-    // 2. Update TEAMS table atomically
-    const teamSheet = getSheet('TEAMS');
-    const teams = findRowsByField(teamSheet, 'sessionId', data.sessionId);
-    const targetTeam = teams.find(t => t.teamCode === data.teamCode);
-
-    let updatedTeam = null;
-    if (targetTeam) {
-      const updates = {
-        score: (Number(targetTeam.score) || 0) + points
-      };
-
-      if (data.eventType === 'RACE_CORRECT' || data.eventType === 'CORRECT') {
-        updates.correctAnswers = (Number(targetTeam.correctAnswers) || 0) + 1;
-        if (data.eventType === 'RACE_CORRECT') {
-          updates.raceWins = (Number(targetTeam.raceWins) || 0) + 1;
+      if (existing.length > 0) {
+        if (mode === 'SKIP') {
+          skipped++;
+          return;
+        } else if (mode === 'UPDATE') {
+          updateObjectById(sheet, existing[0].data.id, {
+            ...r,
+            bankId: bankId,
+            optionA: r.optionA || (r.options && r.options.A),
+            optionB: r.optionB || (r.options && r.options.B),
+            optionC: r.optionC || (r.options && r.options.C),
+            optionD: r.optionD || (r.options && r.options.D)
+          });
+          updated++;
+          return;
         }
-      } else if (data.eventType === 'RACE_WRONG' || data.eventType === 'WRONG') {
-        updates.wrongAnswers = (Number(targetTeam.wrongAnswers) || 0) + 1;
-      } else if (data.eventType === 'STEAL_CORRECT') {
-        updates.stealWins = (Number(targetTeam.stealWins) || 0) + 1;
-        updates.correctAnswers = (Number(targetTeam.correctAnswers) || 0) + 1;
-      } else if (data.eventType === 'SPECIAL_CORRECT') {
-        updates.specialCorrect = (Number(targetTeam.specialCorrect) || 0) + 1;
-        updates.correctAnswers = (Number(targetTeam.correctAnswers) || 0) + 1;
       }
 
-      updatedTeam = updateObjectById(teamSheet, targetTeam.id, updates);
+      // CREATE
+      appendObject(sheet, {
+        id: generateId('q'),
+        bankId: bankId,
+        order: Number(r.order) || (sheet.getLastRow()),
+        subject: sanitizeString(r.subject) || 'Tin học',
+        grade: Number(r.grade) || 5,
+        topic: sanitizeString(r.topic) || '',
+        questionType: r.questionType || 'multiple_choice',
+        question: qText,
+        optionA: sanitizeString(r.optionA || (r.options && r.options.A)),
+        optionB: sanitizeString(r.optionB || (r.options && r.options.B)),
+        optionC: sanitizeString(r.optionC || (r.options && r.options.C)),
+        optionD: sanitizeString(r.optionD || (r.options && r.options.D)),
+        correctAnswer: String(r.correctAnswer).trim().toUpperCase(),
+        explanation: sanitizeString(r.explanation),
+        difficulty: r.difficulty || 'MEDIUM',
+        normalPoints: Number(r.normalPoints) || 10,
+        specialPoints: Number(r.specialPoints) || 20,
+        isSpecial: Boolean(r.isSpecial),
+        enabled: true,
+        tags: sanitizeString(r.tags)
+      });
+      created++;
+    } catch (err) {
+      failed++;
+      errors.push(`Dòng ${idx + 1}: ${err.message}`);
     }
-
-    appendLog('INFO', 'SCORE', 'SCORE_ADDED', `+${points} pts to ${data.teamCode} (${data.eventType})`, data.sessionId, eventObj);
-
-    return successResponse({
-      event: eventObj,
-      team: updatedTeam,
-      pointsAwarded: points
-    }, 'Score recorded');
-
-  } catch (err) {
-    return errorResponse('SCORE_LOCK_ERROR', err.toString());
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function apiScoresGetBySession(data) {
-  requireFields(data, ['sessionId']);
-  const sheet = getSheet('SCORE_EVENTS');
-  const events = findRowsByField(sheet, 'sessionId', data.sessionId);
-  return successResponse(events, 'Session scores loaded');
-}
-
-function apiScoresListEvents(data) {
-  requireFields(data, ['sessionId']);
-  return apiScoresGetBySession(data);
-}
-
-// ==========================================
-// 17. CAM RACE SPECIALIZED API
-// (Logic & Time diff only - NO webcam images, NO biometric)
-// ==========================================
-
-function apiCamRaceAdd(data) {
-  requireFields(data, ['sessionId', 'questionId', 'winnerTeam']);
-  const sheet = getSheet('CAM_RACE_RESULTS');
-
-  const raceResult = {
-    id: generateId('cam'),
-    sessionId: data.sessionId,
-    questionId: data.questionId,
-    questionOrder: Number(data.questionOrder) || 1,
-    winnerTeam: data.winnerTeam.toUpperCase(),
-    blueDetectedAt: data.blueDetectedAt !== undefined ? data.blueDetectedAt : null,
-    orangeDetectedAt: data.orangeDetectedAt !== undefined ? data.orangeDetectedAt : null,
-    timeDifferenceMs: data.timeDifferenceMs !== undefined ? data.timeDifferenceMs : null,
-    isTie: data.isTie === true,
-    isFalseStart: data.isFalseStart === true,
-    detectionMethod: data.detectionMethod || 'CAMERA',
-    blueMarkerConfidence: Number(data.blueMarkerConfidence) || 0,
-    orangeMarkerConfidence: Number(data.orangeMarkerConfidence) || 0,
-    firstAnswerTeam: '',
-    firstAnswer: '',
-    firstAnswerCorrect: false,
-    stealTeam: '',
-    stealAnswer: '',
-    stealCorrect: false,
-    bluePoints: 0,
-    orangePoints: 0,
-    playedAt: getCurrentTimestamp()
-  };
-
-  appendObject(sheet, raceResult);
-  appendLog('INFO', 'CAM_RACE', 'CAM_RACE_RECORDED', `Race Q${data.questionOrder} won by ${data.winnerTeam}`, data.sessionId, {
-    winner: data.winnerTeam,
-    timeDiff: data.timeDifferenceMs
   });
 
-  return successResponse(raceResult, 'Camera race detected successfully');
-}
+  // Ghi IMPORT_HISTORY
+  appendObject(historySheet, {
+    id: generateId('imp'),
+    importType: 'QUESTIONS',
+    fileName: data.fileName || 'web_import.json',
+    fileType: data.fileType || 'JSON',
+    targetBankId: bankId,
+    totalRows: rows.length,
+    createdRows: created,
+    updatedRows: updated,
+    skippedRows: skipped,
+    errorRows: failed,
+    mode: mode,
+    createdAt: getCurrentTimestamp()
+  });
 
-function apiCamRaceAnswerAdd(data) {
-  requireFields(data, ['sessionId', 'questionId', 'teamCode', 'answer', 'answerType']);
-  const lock = LockService.getScriptLock();
-
-  try {
-    lock.waitLock(10000);
-
-    // 1. Fetch Question to verify answer & points
-    const qSheet = getSheet('QUESTIONS');
-    const question = findRowById(qSheet, data.questionId);
-    if (!question) return errorResponse('QUESTION_NOT_FOUND', 'Question not found');
-
-    const qData = question.data;
-    const isSpecial = qData.isSpecial === true || String(qData.isSpecial).toLowerCase() === 'true';
-    
-    // Normalize correct answer letter
-    let expectedLetter = 'A';
-    if (qData.correctAnswer === 0 || qData.correctAnswer === '0' || qData.correctAnswer === 'A') expectedLetter = 'A';
-    else if (qData.correctAnswer === 1 || qData.correctAnswer === '1' || qData.correctAnswer === 'B') expectedLetter = 'B';
-    else if (qData.correctAnswer === 2 || qData.correctAnswer === '2' || qData.correctAnswer === 'C') expectedLetter = 'C';
-    else if (qData.correctAnswer === 3 || qData.correctAnswer === '3' || qData.correctAnswer === 'D') expectedLetter = 'D';
-
-    const givenAnswer = String(data.answer).trim().toUpperCase();
-    const isCorrect = givenAnswer === expectedLetter;
-
-    // Determine eventType & Points
-    let eventType = '';
-    let points = 0;
-
-    if (data.answerType === 'RACE') {
-      if (isCorrect) {
-        eventType = isSpecial ? 'SPECIAL_CORRECT' : 'RACE_CORRECT';
-        points = isSpecial ? (Number(qData.specialPoints) || 20) : (Number(qData.normalPoints) || 10);
-      } else {
-        eventType = 'RACE_WRONG';
-        points = 0;
-      }
-    } else if (data.answerType === 'STEAL') {
-      if (isCorrect) {
-        eventType = 'STEAL_CORRECT';
-        points = Number(qData.stealPoints) || 5;
-      } else {
-        eventType = 'STEAL_WRONG';
-        points = 0;
-      }
-    }
-
-    const eventKey = `${data.sessionId}_q${data.questionId}_${data.teamCode}_${eventType}`;
-
-    // Record Score Event
-    const scoreSheet = getSheet('SCORE_EVENTS');
-    const existing = findRowsByField(scoreSheet, 'eventKey', eventKey);
-    let eventObj = null;
-
-    if (existing.length === 0) {
-      eventObj = {
-        id: generateId('evt'),
-        sessionId: data.sessionId,
-        gameSlug: 'cam-race',
-        roundNumber: Number(data.roundNumber) || 1,
-        questionId: data.questionId,
-        teamId: '',
-        teamCode: data.teamCode,
-        studentId: '',
-        eventType: eventType,
-        points: points,
-        eventKey: eventKey,
-        note: `Answer: ${givenAnswer} (Expected: ${expectedLetter})`,
-        createdAt: getCurrentTimestamp()
-      };
-      appendObject(scoreSheet, eventObj);
-
-      // Update TEAMS table
-      const teamSheet = getSheet('TEAMS');
-      const teams = findRowsByField(teamSheet, 'sessionId', data.sessionId);
-      const team = teams.find(t => t.teamCode === data.teamCode);
-
-      if (team) {
-        const teamUpdates = {
-          score: (Number(team.score) || 0) + points
-        };
-        if (isCorrect) {
-          teamUpdates.correctAnswers = (Number(team.correctAnswers) || 0) + 1;
-          if (data.answerType === 'STEAL') {
-            teamUpdates.stealWins = (Number(team.stealWins) || 0) + 1;
-          } else if (isSpecial) {
-            teamUpdates.specialCorrect = (Number(team.specialCorrect) || 0) + 1;
-          }
-        } else {
-          teamUpdates.wrongAnswers = (Number(team.wrongAnswers) || 0) + 1;
-        }
-        updateObjectById(teamSheet, team.id, teamUpdates);
-      }
-    }
-
-    // Update CAM_RACE_RESULTS entry
-    const camSheet = getSheet('CAM_RACE_RESULTS');
-    const raceEntries = findRowsByField(camSheet, 'sessionId', data.sessionId);
-    const targetEntry = raceEntries.find(r => String(r.questionId) === String(data.questionId));
-
-    if (targetEntry) {
-      const updates = {};
-      if (data.answerType === 'RACE') {
-        updates.firstAnswerTeam = data.teamCode;
-        updates.firstAnswer = givenAnswer;
-        updates.firstAnswerCorrect = isCorrect;
-        if (data.teamCode === 'BLUE') updates.bluePoints = points;
-        else if (data.teamCode === 'ORANGE') updates.orangePoints = points;
-      } else if (data.answerType === 'STEAL') {
-        updates.stealTeam = data.teamCode;
-        updates.stealAnswer = givenAnswer;
-        updates.stealCorrect = isCorrect;
-        if (data.teamCode === 'BLUE') updates.bluePoints = points;
-        else if (data.teamCode === 'ORANGE') updates.orangePoints = points;
-      }
-      updateObjectById(camSheet, targetEntry.id, updates);
-    }
-
-    return successResponse({
-      isCorrect: isCorrect,
-      correctAnswer: expectedLetter,
-      points: points,
-      eventType: eventType,
-      teamCode: data.teamCode
-    }, isCorrect ? 'Đáp án CHÍNH XÁC!' : 'Đáp án không chính xác');
-
-  } catch (err) {
-    return errorResponse('CAM_ANSWER_ERROR', err.toString());
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function apiCamRaceCompleteQuestion(data) {
-  requireFields(data, ['sessionId', 'currentQuestion']);
-  const sessionSheet = getSheet('GAME_SESSIONS');
-  const session = findRowById(sessionSheet, data.sessionId);
-  if (!session) return errorResponse('SESSION_NOT_FOUND', 'Session not found');
-
-  const totalQuestions = Number(session.data.totalQuestions) || 15;
-  const nextQ = Math.min(Number(data.currentQuestion) + 1, totalQuestions);
-  const readyToFinish = Number(data.currentQuestion) >= totalQuestions;
-
-  updateObjectById(sessionSheet, data.sessionId, {
-    currentQuestion: nextQ
+  appendLog('INFO', 'IMPORT', 'questions.importBatch', `Import ${rows.length} câu hỏi: ${created} tạo, ${updated} sửa, ${skipped} bỏ qua, ${failed} lỗi.`, '', {
+    bankId: bankId,
+    created: created,
+    failed: failed
   });
 
   return successResponse({
-    currentQuestion: nextQ,
-    totalQuestions: totalQuestions,
-    readyToFinish: readyToFinish
-  }, 'Question completed');
+    total: rows.length,
+    created: created,
+    updated: updated,
+    skipped: skipped,
+    failed: failed,
+    errors: errors
+  }, 'Xử lý import câu hỏi hoàn tất');
 }
 
-function apiCamRaceHistoryList(data) {
+function apiImportTeamsBatch(data) {
+  requireFields(data, ['sessionId', 'rows']);
+  const sessionId = data.sessionId;
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  if (rows.length > 4) {
+    return errorResponse('TEAM_LIMIT_EXCEEDED', 'Mỗi phiên chơi chỉ hỗ trợ tối đa 4 đội.');
+  }
+
+  const teamSheet = getSheet('TEAMS');
+  const historySheet = getSheet('IMPORT_HISTORY');
+  let created = 0;
+
+  rows.forEach((r, idx) => {
+    const code = r.teamCode || `TEAM${idx + 1}`;
+    appendObject(teamSheet, {
+      id: generateId('team'),
+      sessionId: sessionId,
+      teamCode: code,
+      teamName: sanitizeString(r.teamName) || `Đội ${idx + 1}`,
+      teamColor: r.teamColor || '#2563EB',
+      markerColor: r.markerColor || r.teamColor || '#2563EB',
+      score: 0,
+      rank: idx + 1,
+      correctAnswers: 0,
+      wrongAnswers: 0,
+      stealWins: 0,
+      bonusPoints: 0,
+      penaltyPoints: 0,
+      specialCorrect: 0
+    });
+    created++;
+  });
+
+  appendObject(historySheet, {
+    id: generateId('imp'),
+    importType: 'TEAMS',
+    fileName: data.fileName || 'teams_import.json',
+    fileType: data.fileType || 'JSON',
+    targetBankId: sessionId,
+    totalRows: rows.length,
+    createdRows: created,
+    updatedRows: 0,
+    skippedRows: 0,
+    errorRows: 0,
+    mode: 'CREATE'
+  });
+
+  return successResponse({ total: rows.length, created: created }, 'Import đội hoàn tất');
+}
+
+function apiListImportHistory() {
+  const sheet = getSheet('IMPORT_HISTORY');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+  const headers = getHeaders(sheet);
+  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  return successResponse(rows.map(r => rowToObject(headers, r)).reverse());
+}
+
+// ==========================================
+// 12. API HANDLERS - GAME SESSIONS
+// ==========================================
+
+function apiCreateSession(data) {
+  requireFields(data, ['gameSlug']);
+  const gameSlug = data.gameSlug;
+
+  // 1. Kiểm tra game tồn tại
+  const catalogSheet = getSheet('GAME_CATALOG');
+  const gameRows = findRowsByField(catalogSheet, 'slug', gameSlug);
+  if (gameRows.length === 0) {
+    return errorResponse('GAME_NOT_FOUND', `Trò chơi '${gameSlug}' không tồn tại trong GAME_CATALOG`);
+  }
+  const gameInfo = gameRows[0].data;
+
+  // 2. Validate teamCount
+  let teamCount = Number(data.teamCount) || 2;
+  if (gameSlug === 'cam-race') {
+    teamCount = 2; // Cam Race luôn cố định 2 đội
+  } else if (teamCount < 2 || teamCount > 4) {
+    return errorResponse('INVALID_TEAM_COUNT', `Số lượng đội phải từ 2 đến 4 (nhận được ${teamCount}).`);
+  }
+
+  const sessionId = data.sessionId || generateId('session');
+  const sessionCode = generateSessionCode();
+  const sessionSheet = getSheet('GAME_SESSIONS');
+  const teamSheet = getSheet('TEAMS');
+
+  const sessionObj = {
+    id: sessionId,
+    sessionCode: sessionCode,
+    gameId: gameInfo.id || `game_${gameSlug}`,
+    gameSlug: gameSlug,
+    activityName: sanitizeString(data.activityName) || `${gameInfo.name} - Trận đấu mới`,
+    classId: sanitizeString(data.classId) || '',
+    className: sanitizeString(data.className) || 'Lớp học',
+    teacherName: sanitizeString(data.teacherName) || '',
+    schoolName: sanitizeString(data.schoolName) || '',
+    subject: sanitizeString(data.subject) || 'Tin học',
+    grade: sanitizeString(data.grade) || '5',
+    questionBankId: sanitizeString(data.questionBankId) || 'bank_tinhoc5_demo',
+    teamCount: teamCount,
+    status: data.status || 'READY',
+    currentRound: 1,
+    currentQuestion: 1,
+    totalQuestions: Number(data.totalQuestions) || 15,
+    winnerTeamId: '',
+    winnerTeamName: '',
+    startedAt: getCurrentTimestamp(),
+    finishedAt: '',
+    createdAt: getCurrentTimestamp(),
+    updatedAt: getCurrentTimestamp()
+  };
+
+  appendObject(sessionSheet, sessionObj);
+
+  // 3. Tự động khởi tạo các Đội cho phiên thi đấu
+  const createdTeams = [];
+  const defaultColors = ['#2563EB', '#EA580C', '#16A34A', '#9333EA']; // Blue, Orange, Green, Purple
+  const defaultNames = ['Tia Chớp', 'Ngọn Lửa', 'Chiến Binh', 'Ngôi Sao'];
+
+  for (let i = 0; i < teamCount; i++) {
+    let code = `TEAM${i + 1}`;
+    let name = defaultNames[i];
+    let color = defaultColors[i];
+
+    if (gameSlug === 'cam-race') {
+      code = i === 0 ? 'BLUE' : 'ORANGE';
+      name = i === 0 ? (data.blueTeamName || 'Đội Xanh (Blue)') : (data.orangeTeamName || 'Đội Cam (Orange)');
+      color = i === 0 ? '#2563EB' : '#EA580C';
+    }
+
+    if (data.teams && data.teams[i]) {
+      name = data.teams[i].teamName || name;
+      color = data.teams[i].teamColor || color;
+      if (data.teams[i].teamCode) code = data.teams[i].teamCode;
+    }
+
+    const t = {
+      id: generateId('team'),
+      sessionId: sessionId,
+      teamCode: code,
+      teamName: name,
+      teamColor: color,
+      markerColor: color,
+      score: 0,
+      rank: i + 1,
+      correctAnswers: 0,
+      wrongAnswers: 0,
+      stealWins: 0,
+      bonusPoints: 0,
+      penaltyPoints: 0,
+      specialCorrect: 0
+    };
+    appendObject(teamSheet, t);
+    createdTeams.push(t);
+  }
+
+  appendLog('INFO', 'SYSTEM', 'SESSION_CREATED', `Khởi tạo trận ${gameSlug} (${teamCount} đội) - Code: ${sessionCode}`, sessionId, {
+    gameSlug: gameSlug,
+    teamCount: teamCount
+  });
+
+  return successResponse({
+    ...sessionObj,
+    teams: createdTeams
+  }, 'Đã khởi tạo phiên thi đấu thành công');
+}
+
+function apiGetSession(data) {
+  requireFields(data, ['sessionId']);
+  const sessionSheet = getSheet('GAME_SESSIONS');
+  const teamSheet = getSheet('TEAMS');
+
+  const found = findRowById(sessionSheet, data.sessionId);
+  if (!found) return errorResponse('SESSION_NOT_FOUND', 'Không tìm thấy phiên thi đấu');
+
+  const teams = findRowsByField(teamSheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse({
+    ...found.data,
+    teams: teams
+  });
+}
+
+function apiUpdateSession(data) {
+  requireFields(data, ['sessionId']);
+  const sheet = getSheet('GAME_SESSIONS');
+  const updated = updateObjectById(sheet, data.sessionId, data);
+  if (!updated) return errorResponse('SESSION_NOT_FOUND', 'Không tìm thấy phiên thi đấu');
+  return successResponse(updated, 'Đã cập nhật phiên thi đấu');
+}
+
+function apiListSessions(data) {
+  const sheet = getSheet('GAME_SESSIONS');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+  const headers = getHeaders(sheet);
+  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const list = rows.map(r => rowToObject(headers, r)).reverse();
+  return successResponse(list.slice(0, 50));
+}
+
+function apiListSessionsByClass(data) {
+  requireFields(data, ['classId']);
+  const sheet = getSheet('GAME_SESSIONS');
+  const rows = findRowsByField(sheet, 'classId', data.classId).map(r => r.data).reverse();
+  return successResponse(rows);
+}
+
+function apiCancelSession(data) {
+  requireFields(data, ['sessionId']);
+  const sheet = getSheet('GAME_SESSIONS');
+  const updated = updateObjectById(sheet, data.sessionId, { status: 'CANCELLED' });
+  if (!updated) return errorResponse('SESSION_NOT_FOUND', 'Không tìm thấy phiên để hủy');
+  return successResponse(updated, 'Đã hủy phiên thi đấu');
+}
+
+// ==========================================
+// 13. API HANDLERS - TEAMS
+// ==========================================
+
+function apiCreateTeam(data) {
+  requireFields(data, ['sessionId', 'teamName']);
+  const sheet = getSheet('TEAMS');
+  const existing = findRowsByField(sheet, 'sessionId', data.sessionId);
+  if (existing.length >= 4) {
+    return errorResponse('TEAM_LIMIT_EXCEEDED', 'Mỗi phiên chơi chỉ hỗ trợ tối đa 4 đội.');
+  }
+
+  const code = data.teamCode || `TEAM${existing.length + 1}`;
+  const team = {
+    id: generateId('team'),
+    sessionId: data.sessionId,
+    teamCode: code,
+    teamName: sanitizeString(data.teamName),
+    teamColor: data.teamColor || '#2563EB',
+    markerColor: data.markerColor || data.teamColor || '#2563EB',
+    score: Number(data.score) || 0,
+    rank: existing.length + 1,
+    correctAnswers: 0,
+    wrongAnswers: 0,
+    stealWins: 0,
+    bonusPoints: 0,
+    penaltyPoints: 0,
+    specialCorrect: 0
+  };
+  appendObject(sheet, team);
+  return successResponse(team, 'Đã thêm đội mới vào trận đấu');
+}
+
+function apiCreateTeamsBatch(data) {
+  requireFields(data, ['sessionId', 'teams']);
+  const sheet = getSheet('TEAMS');
+  const results = [];
+  data.teams.slice(0, 4).forEach((t, idx) => {
+    const code = t.teamCode || `TEAM${idx + 1}`;
+    const obj = {
+      id: generateId('team'),
+      sessionId: data.sessionId,
+      teamCode: code,
+      teamName: sanitizeString(t.teamName) || `Đội ${idx + 1}`,
+      teamColor: t.teamColor || '#2563EB',
+      markerColor: t.markerColor || t.teamColor || '#2563EB',
+      score: 0,
+      rank: idx + 1,
+      correctAnswers: 0,
+      wrongAnswers: 0,
+      stealWins: 0,
+      bonusPoints: 0,
+      penaltyPoints: 0,
+      specialCorrect: 0
+    };
+    appendObject(sheet, obj);
+    results.push(obj);
+  });
+  return successResponse(results, 'Đã nạp danh sách đội');
+}
+
+function apiListTeamsBySession(data) {
+  requireFields(data, ['sessionId']);
+  const sheet = getSheet('TEAMS');
+  const teams = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  // Sort score DESC
+  teams.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+  return successResponse(teams);
+}
+
+function apiGetTeam(data) {
+  requireFields(data, ['teamId']);
+  const sheet = getSheet('TEAMS');
+  const found = findRowById(sheet, data.teamId);
+  if (!found) return errorResponse('TEAM_NOT_FOUND', 'Không tìm thấy đội');
+  return successResponse(found.data);
+}
+
+function apiUpdateTeam(data) {
+  requireFields(data, ['teamId']);
+  const sheet = getSheet('TEAMS');
+  const updated = updateObjectById(sheet, data.teamId, data);
+  if (!updated) return errorResponse('TEAM_NOT_FOUND', 'Không tìm thấy đội');
+  return successResponse(updated, 'Đã cập nhật thông tin đội');
+}
+
+function apiDeleteTeam(data) {
+  requireFields(data, ['teamId']);
+  const sheet = getSheet('TEAMS');
+  const deleted = deleteObjectById(sheet, data.teamId);
+  if (!deleted) return errorResponse('TEAM_NOT_FOUND', 'Không tìm thấy đội');
+  return successResponse({ deleted: true }, 'Đã xóa đội');
+}
+
+function apiGetTeamScore(data) {
+  requireFields(data, ['teamId']);
+  const sheet = getSheet('TEAMS');
+  const found = findRowById(sheet, data.teamId);
+  if (!found) return errorResponse('TEAM_NOT_FOUND', 'Không tìm thấy đội');
+  return successResponse({
+    teamId: found.data.id,
+    teamName: found.data.teamName,
+    score: Number(found.data.score) || 0
+  });
+}
+
+function apiGetTeamLeaderboard(data) {
+  requireFields(data, ['sessionId']);
+  return apiListTeamsBySession(data);
+}
+
+// ==========================================
+// 14. GENERIC SCORE ENGINE & LOCKSERVICE
+// ==========================================
+
+function calculatePointsForQuestion(question, eventType, customPoints) {
+  if (customPoints !== undefined && customPoints !== null && !isNaN(Number(customPoints))) {
+    return Number(customPoints);
+  }
+
+  let basePoints = 10;
+  if (question) {
+    basePoints = question.isSpecial ? (Number(question.specialPoints) || 20) : (Number(question.normalPoints) || 10);
+  }
+
+  // Tỉ lệ điểm cướp = 50% (làm tròn xuống)
+  if (eventType.includes('STEAL')) {
+    return Math.floor(basePoints * 0.5);
+  }
+
+  if (eventType.includes('WRONG')) {
+    return 0;
+  }
+
+  return basePoints;
+}
+
+function apiAddScoreEvent(data) {
+  requireFields(data, ['sessionId', 'teamCode', 'eventType']);
+  const lock = LockService.getScriptLock();
+  try {
+    // Chờ khóa 10 giây để chống xung đột ghi điểm
+    lock.waitLock(10000);
+
+    const sessionId = data.sessionId;
+    const teamCode = String(data.teamCode).trim().toUpperCase();
+    const eventType = String(data.eventType).trim().toUpperCase();
+    const eventKey = data.eventKey || `${sessionId}_${data.questionId || 'rnd'}_${teamCode}_${eventType}_${Date.now()}`;
+
+    const scoreSheet = getSheet('SCORE_EVENTS');
+    const teamSheet = getSheet('TEAMS');
+    const questionSheet = getSheet('QUESTIONS');
+
+    // 1. CHỐNG CỘNG ĐIỂM TRÙNG (Idempotency)
+    const existingEvents = findRowsByField(scoreSheet, 'eventKey', eventKey);
+    if (existingEvents.length > 0) {
+      return errorResponse('DUPLICATE_SCORE_EVENT', `Sự kiện điểm đã được ghi nhận trước đó (Key: ${eventKey})`);
+    }
+
+    // 2. Tìm câu hỏi nếu có questionId
+    let questionObj = null;
+    if (data.questionId) {
+      const qFound = findRowById(questionSheet, data.questionId);
+      if (qFound) questionObj = qFound.data;
+    }
+
+    // 3. Tính điểm server-side
+    const awardedPoints = calculatePointsForQuestion(questionObj, eventType, data.points);
+
+    // 4. Tìm đội trong TEAMS
+    const teamRows = findRowsByField(teamSheet, 'sessionId', sessionId);
+    let targetTeam = null;
+    let targetRowIndex = -1;
+
+    for (const tr of teamRows) {
+      if (String(tr.data.teamCode).toUpperCase() === teamCode || String(tr.data.id) === String(data.teamId)) {
+        targetTeam = tr.data;
+        targetRowIndex = tr.rowIndex;
+        break;
+      }
+    }
+
+    if (!targetTeam) {
+      return errorResponse('TEAM_NOT_FOUND', `Không tìm thấy đội '${teamCode}' trong phiên ${sessionId}`);
+    }
+
+    // 5. Ghi SCORE_EVENTS
+    const scoreEventRecord = {
+      id: generateId('score'),
+      sessionId: sessionId,
+      gameSlug: data.gameSlug || 'game',
+      roundNumber: Number(data.roundNumber) || 1,
+      questionId: data.questionId || '',
+      teamId: targetTeam.id,
+      teamCode: targetTeam.teamCode,
+      eventType: eventType,
+      points: awardedPoints,
+      eventKey: eventKey,
+      note: sanitizeString(data.note) || '',
+      createdAt: getCurrentTimestamp()
+    };
+    appendObject(scoreSheet, scoreEventRecord);
+
+    // 6. Cập nhật điểm và thống kê đội
+    const newScore = (Number(targetTeam.score) || 0) + awardedPoints;
+    let correctInc = 0;
+    let wrongInc = 0;
+    let stealInc = 0;
+    let specialInc = 0;
+
+    if (eventType.includes('CORRECT')) {
+      correctInc = 1;
+      if (questionObj && (questionObj.isSpecial === true || String(questionObj.isSpecial).toUpperCase() === 'TRUE')) {
+        specialInc = 1;
+      }
+    }
+    if (eventType.includes('WRONG')) {
+      wrongInc = 1;
+    }
+    if (eventType.includes('STEAL_CORRECT')) {
+      stealInc = 1;
+    }
+
+    updateObjectById(teamSheet, targetTeam.id, {
+      score: newScore,
+      correctAnswers: (Number(targetTeam.correctAnswers) || 0) + correctInc,
+      wrongAnswers: (Number(targetTeam.wrongAnswers) || 0) + wrongInc,
+      stealWins: (Number(targetTeam.stealWins) || 0) + stealInc,
+      specialCorrect: (Number(targetTeam.specialCorrect) || 0) + specialInc,
+      bonusPoints: awardedPoints > 0 && eventType === 'BONUS' ? (Number(targetTeam.bonusPoints) || 0) + awardedPoints : targetTeam.bonusPoints,
+      penaltyPoints: awardedPoints < 0 || eventType === 'PENALTY' ? (Number(targetTeam.penaltyPoints) || 0) + Math.abs(awardedPoints) : targetTeam.penaltyPoints
+    });
+
+    appendLog('INFO', 'SCORING', 'SCORE_ADDED', `${targetTeam.teamName} (${targetTeam.teamCode}): ${awardedPoints >= 0 ? '+' : ''}${awardedPoints}đ [${eventType}]`, sessionId, {
+      points: awardedPoints,
+      newScore: newScore,
+      eventKey: eventKey
+    });
+
+    return successResponse({
+      teamId: targetTeam.id,
+      teamCode: targetTeam.teamCode,
+      pointsAwarded: awardedPoints,
+      newScore: newScore,
+      eventKey: eventKey
+    }, 'Đã cập nhật điểm thành công');
+  } catch (err) {
+    return errorResponse('SCORE_LOCK_ERROR', `Không thể ghi điểm do bận khóa server: ${err.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function apiListScoresBySession(data) {
+  requireFields(data, ['sessionId']);
+  const sheet = getSheet('SCORE_EVENTS');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse(rows);
+}
+
+function apiRecalculateScores(data) {
+  requireFields(data, ['sessionId']);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const scoreSheet = getSheet('SCORE_EVENTS');
+    const teamSheet = getSheet('TEAMS');
+
+    const events = findRowsByField(scoreSheet, 'sessionId', data.sessionId).map(r => r.data);
+    const teams = findRowsByField(teamSheet, 'sessionId', data.sessionId).map(r => r.data);
+
+    const totals = {};
+    teams.forEach(t => {
+      totals[t.id] = {
+        score: 0,
+        correct: 0,
+        wrong: 0,
+        steal: 0,
+        special: 0
+      };
+    });
+
+    events.forEach(ev => {
+      if (totals[ev.teamId]) {
+        totals[ev.teamId].score += (Number(ev.points) || 0);
+        if (String(ev.eventType).includes('CORRECT')) totals[ev.teamId].correct++;
+        if (String(ev.eventType).includes('WRONG')) totals[ev.teamId].wrong++;
+        if (String(ev.eventType).includes('STEAL_CORRECT')) totals[ev.teamId].steal++;
+        if (String(ev.eventType) === 'SPECIAL_CORRECT') totals[ev.teamId].special++;
+      }
+    });
+
+    teams.forEach(t => {
+      const stats = totals[t.id];
+      updateObjectById(teamSheet, t.id, {
+        score: stats.score,
+        correctAnswers: stats.correct,
+        wrongAnswers: stats.wrong,
+        stealWins: stats.steal,
+        specialCorrect: stats.special
+      });
+    });
+
+    return successResponse(totals, 'Đã tính toán lại toàn bộ điểm số từ sổ cái.');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ==========================================
+// 15. API HANDLERS - CAM RACE
+// ==========================================
+
+function apiCamRaceAddRace(data) {
+  requireFields(data, ['sessionId', 'questionId', 'winnerTeamCode']);
+  const sheet = getSheet('CAM_RACE_RESULTS');
+  const teamSheet = getSheet('TEAMS');
+
+  // Tìm winnerTeamId
+  const teamRows = findRowsByField(teamSheet, 'sessionId', data.sessionId);
+  let winnerId = '';
+  teamRows.forEach(tr => {
+    if (String(tr.data.teamCode).toUpperCase() === String(data.winnerTeamCode).toUpperCase()) {
+      winnerId = tr.data.id;
+    }
+  });
+
+  const record = {
+    id: generateId('camrace'),
+    sessionId: data.sessionId,
+    questionId: data.questionId,
+    questionOrder: Number(data.questionOrder) || 1,
+    winnerTeamId: winnerId,
+    winnerTeamCode: data.winnerTeamCode,
+    blueDetectedAt: data.blueDetectedAt !== undefined ? data.blueDetectedAt : null,
+    orangeDetectedAt: data.orangeDetectedAt !== undefined ? data.orangeDetectedAt : null,
+    timeDifferenceMs: data.timeDifferenceMs !== undefined ? data.timeDifferenceMs : null,
+    isTie: Boolean(data.isTie),
+    isFalseStart: Boolean(data.isFalseStart),
+    detectionMethod: data.detectionMethod || 'CAMERA',
+    blueMarkerConfidence: data.blueMarkerConfidence || null,
+    orangeMarkerConfidence: data.orangeMarkerConfidence || null,
+    firstAnswer: '',
+    firstAnswerCorrect: false,
+    stealTeamId: '',
+    stealAnswer: '',
+    stealCorrect: false,
+    pointsAwarded: 0,
+    playedAt: getCurrentTimestamp()
+  };
+
+  appendObject(sheet, record);
+  appendLog('INFO', 'CAM_RACE', 'CAM_RACE_RECORDED', `Cam Race vòng tranh quyền: Đội ${data.winnerTeamCode} giành quyền.`, data.sessionId, record);
+
+  return successResponse(record, 'Đã ghi nhận kết quả vòng tranh quyền thẻ màu Cam Race');
+}
+
+function apiCamRaceAddAnswer(data) {
+  requireFields(data, ['sessionId', 'questionId', 'teamCode', 'answer']);
+  const questionSheet = getSheet('QUESTIONS');
+  const camResultSheet = getSheet('CAM_RACE_RESULTS');
+
+  // Kiểm tra đáp án câu hỏi
+  let isCorrect = false;
+  let questionObj = null;
+  const qFound = findRowById(questionSheet, data.questionId);
+  if (qFound) {
+    questionObj = qFound.data;
+    isCorrect = String(data.answer).trim().toUpperCase() === String(questionObj.correctAnswer).trim().toUpperCase();
+  }
+
+  const answerType = data.answerType || 'RACE';
+  const eventType = answerType === 'STEAL'
+    ? (isCorrect ? 'CAM_RACE_STEAL_CORRECT' : 'CAM_RACE_STEAL_WRONG')
+    : (isCorrect ? 'CAM_RACE_CORRECT' : 'CAM_RACE_WRONG');
+
+  // Thêm điểm qua ledger
+  const scoreResult = apiAddScoreEvent({
+    sessionId: data.sessionId,
+    gameSlug: 'cam-race',
+    questionId: data.questionId,
+    teamCode: data.teamCode,
+    eventType: eventType,
+    eventKey: `${data.sessionId}_q${data.questionId}_${data.teamCode}_${eventType}`
+  });
+
+  const points = (scoreResult.success && scoreResult.data) ? scoreResult.data.pointsAwarded : 0;
+
+  // Cập nhật CAM_RACE_RESULTS câu hỏi này
+  const results = findRowsByField(camResultSheet, 'sessionId', data.sessionId);
+  const qRecord = results.find(r => String(r.data.questionId) === String(data.questionId));
+  if (qRecord) {
+    if (answerType === 'RACE') {
+      updateObjectById(camResultSheet, qRecord.data.id, {
+        firstAnswer: data.answer,
+        firstAnswerCorrect: isCorrect,
+        pointsAwarded: points
+      });
+    } else {
+      updateObjectById(camResultSheet, qRecord.data.id, {
+        stealAnswer: data.answer,
+        stealCorrect: isCorrect,
+        pointsAwarded: (Number(qRecord.data.pointsAwarded) || 0) + points
+      });
+    }
+  }
+
+  return successResponse({
+    isCorrect: isCorrect,
+    pointsAwarded: points,
+    correctAnswer: questionObj ? questionObj.correctAnswer : ''
+  }, isCorrect ? 'Chúc mừng! Trả lời chính xác.' : 'Rất tiếc! Trả lời chưa chính xác.');
+}
+
+function apiCamRaceCompleteQuestion(data) {
+  return apiProgressCompleteQuestion(data);
+}
+
+function apiCamRaceListHistory(data) {
   requireFields(data, ['sessionId']);
   const sheet = getSheet('CAM_RACE_RESULTS');
-  const results = findRowsByField(sheet, 'sessionId', data.sessionId);
-  return successResponse(results, 'Cam Race history loaded');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse(rows);
 }
 
 // ==========================================
-// 18. QUIZ BATTLE API
+// 16. API HANDLERS - SMILE RACE
 // ==========================================
 
-function apiQuizAnswerAdd(data) {
+function apiSmileRaceAddGesture(data) {
+  requireFields(data, ['sessionId', 'questionId', 'winnerTeamCode']);
+  const sheet = getSheet('SMILE_RACE_RESULTS');
+  const teamSheet = getSheet('TEAMS');
+
+  let winnerId = data.winnerTeamId || '';
+  if (!winnerId) {
+    const teamRows = findRowsByField(teamSheet, 'sessionId', data.sessionId);
+    teamRows.forEach(tr => {
+      if (String(tr.data.teamCode).toUpperCase() === String(data.winnerTeamCode).toUpperCase()) {
+        winnerId = tr.data.id;
+      }
+    });
+  }
+
+  const record = {
+    id: generateId('smilerace'),
+    sessionId: data.sessionId,
+    questionId: data.questionId,
+    questionOrder: Number(data.questionOrder) || 1,
+    winnerTeamId: winnerId,
+    winnerTeamCode: data.winnerTeamCode,
+    winnerTeamName: data.winnerTeamName || data.winnerTeamCode,
+    gestureTimestamp: data.gestureTimestamp || null,
+    gestureScore: data.gestureScore || 0,
+    markerConfidence: data.markerConfidence || null,
+    stableFrames: data.stableFrames || 4,
+    isTie: Boolean(data.isTie),
+    detectionMethod: data.detectionMethod || 'CAMERA',
+    firstAnswer: '',
+    firstAnswerCorrect: false,
+    stealTeamId: '',
+    stealTeamCode: '',
+    stealAnswer: '',
+    stealCorrect: false,
+    fullPoints: 10,
+    stealPoints: 5,
+    pointsAwarded: 0,
+    playedAt: getCurrentTimestamp()
+  };
+
+  appendObject(sheet, record);
+  appendLog('INFO', 'SMILE_RACE', 'SMILE_RACE_RECORDED', `Smile Race: ${record.winnerTeamName} cười chiến thắng (Score: ${record.gestureScore})`, data.sessionId, {
+    winnerTeamCode: data.winnerTeamCode,
+    gestureScore: data.gestureScore
+  });
+
+  return successResponse(record, 'Đã ghi nhận kết quả nụ cười đội chiến thắng');
+}
+
+function apiSmileRaceAddAnswer(data) {
   requireFields(data, ['sessionId', 'questionId', 'teamCode', 'answer']);
-  // Delegate to shared score engine
-  data.gameSlug = 'quiz-battle';
-  data.answerType = 'RACE';
-  return apiCamRaceAnswerAdd(data);
+  const questionSheet = getSheet('QUESTIONS');
+  const smileResultSheet = getSheet('SMILE_RACE_RESULTS');
+
+  let isCorrect = false;
+  let questionObj = null;
+  const qFound = findRowById(questionSheet, data.questionId);
+  if (qFound) {
+    questionObj = qFound.data;
+    isCorrect = String(data.answer).trim().toUpperCase() === String(questionObj.correctAnswer).trim().toUpperCase();
+  }
+
+  const answerType = data.answerType || 'RACE';
+  const eventType = answerType === 'STEAL'
+    ? (isCorrect ? 'SMILE_STEAL_CORRECT' : 'SMILE_STEAL_WRONG')
+    : (isCorrect ? 'SMILE_RACE_CORRECT' : 'SMILE_RACE_WRONG');
+
+  const scoreResult = apiAddScoreEvent({
+    sessionId: data.sessionId,
+    gameSlug: 'smile-race',
+    questionId: data.questionId,
+    teamCode: data.teamCode,
+    teamId: data.teamId,
+    eventType: eventType,
+    eventKey: `${data.sessionId}_q${data.questionId}_${data.teamCode}_${eventType}`
+  });
+
+  const points = (scoreResult.success && scoreResult.data) ? scoreResult.data.pointsAwarded : 0;
+
+  // Cập nhật SMILE_RACE_RESULTS
+  const results = findRowsByField(smileResultSheet, 'sessionId', data.sessionId);
+  const qRecord = results.find(r => String(r.data.questionId) === String(data.questionId));
+  if (qRecord) {
+    if (answerType === 'RACE') {
+      updateObjectById(smileResultSheet, qRecord.data.id, {
+        firstAnswer: data.answer,
+        firstAnswerCorrect: isCorrect,
+        pointsAwarded: points
+      });
+    } else {
+      updateObjectById(smileResultSheet, qRecord.data.id, {
+        stealTeamId: data.teamId || '',
+        stealTeamCode: data.teamCode,
+        stealAnswer: data.answer,
+        stealCorrect: isCorrect,
+        pointsAwarded: (Number(qRecord.data.pointsAwarded) || 0) + points
+      });
+    }
+  }
+
+  return successResponse({
+    isCorrect: isCorrect,
+    pointsAwarded: points,
+    correctAnswer: questionObj ? questionObj.correctAnswer : ''
+  }, isCorrect ? 'Chính xác!' : 'Sai rồi!');
+}
+
+function apiSmileRaceCompleteQuestion(data) {
+  return apiProgressCompleteQuestion(data);
+}
+
+function apiSmileRaceListHistory(data) {
+  requireFields(data, ['sessionId']);
+  const sheet = getSheet('SMILE_RACE_RESULTS');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse(rows);
 }
 
 // ==========================================
-// 19. FASTEST HAND API
+// 17. API HANDLERS - FASTEST HAND
 // ==========================================
 
 function apiFastestHandBuzz(data) {
   requireFields(data, ['sessionId', 'roundNumber', 'teamCode']);
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(5000);
+    lock.waitLock(8000);
+    const sheet = getSheet('FASTEST_HAND_RESULTS');
+    const roundNumber = Number(data.roundNumber) || 1;
 
-    const sheet = getSheet('APP_LOGS');
-    const buzzKey = `buzz_${data.sessionId}_r${data.roundNumber}`;
+    // KIỂM TRA FIRST BUZZ LOCK: Đội đầu tiên bấm thành công sẽ khóa vòng này
+    const existing = findRowsByField(sheet, 'sessionId', data.sessionId);
+    const roundWinner = existing.find(r => Number(r.data.roundNumber) === roundNumber);
 
-    // Verify if first buzz recorded in logs
-    const existing = findRowsByField(sheet, 'action', buzzKey);
-    if (existing.length > 0) {
-      return successResponse({
-        winnerTeamCode: existing[0].message,
-        isFirst: false
-      }, 'Chuông đã được bấm bởi đội ' + existing[0].message);
+    if (roundWinner) {
+      return errorResponse('BUZZ_LOCKED', `Đội '${roundWinner.data.winnerTeamCode}' đã giành quyền bấm chuông trước.`);
     }
 
-    appendLog('INFO', 'FASTEST_HAND', buzzKey, data.teamCode, data.sessionId, {
-      buzzTimestamp: data.buzzTimestamp || getCurrentTimestamp()
-    });
-
-    return successResponse({
+    const record = {
+      id: generateId('fasthand'),
+      sessionId: data.sessionId,
+      roundNumber: roundNumber,
+      questionId: data.questionId || '',
+      winnerTeamId: data.teamId || '',
       winnerTeamCode: data.teamCode,
-      isFirst: true
-    }, `Đội ${data.teamCode} bấm chuông nhanh nhất!`);
+      buzzTimestamp: data.buzzTimestamp || Date.now(),
+      responseTimeMs: data.responseTimeMs || 0,
+      answer: '',
+      isCorrect: false,
+      pointsAwarded: 0,
+      playedAt: getCurrentTimestamp()
+    };
+
+    appendObject(sheet, record);
+    appendLog('INFO', 'FASTEST_HAND', 'FASTEST_HAND_BUZZ', `Fastest Hand: ${data.teamCode} bấm chuông đầu tiên (Thời gian: ${data.responseTimeMs}ms)`, data.sessionId, record);
+
+    return successResponse(record, `Đội ${data.teamCode} bấm chuông nhanh nhất!`);
   } finally {
     lock.releaseLock();
   }
 }
 
 function apiFastestHandAnswer(data) {
-  requireFields(data, ['sessionId', 'teamCode', 'isCorrect']);
-  data.gameSlug = 'fastest-hand';
-  data.eventType = data.isCorrect ? 'CORRECT' : 'WRONG';
-  return apiScoresAddEvent(data);
-}
+  requireFields(data, ['sessionId', 'roundNumber', 'teamCode', 'answer']);
+  const questionSheet = getSheet('QUESTIONS');
+  const resultSheet = getSheet('FASTEST_HAND_RESULTS');
 
-// ==========================================
-// 20. LUCKY WHEEL API
-// ==========================================
+  let isCorrect = false;
+  let questionObj = null;
+  if (data.questionId) {
+    const qFound = findRowById(questionSheet, data.questionId);
+    if (qFound) {
+      questionObj = qFound.data;
+      isCorrect = String(data.answer).trim().toUpperCase() === String(questionObj.correctAnswer).trim().toUpperCase();
+    }
+  } else {
+    isCorrect = data.isCorrect === true;
+  }
 
-function apiLuckyWheelAddSpin(data) {
-  requireFields(data, ['sessionId', 'selectedName']);
-  const sheet = getSheet('LUCKY_WHEEL_HISTORY');
-
-  const spinRecord = {
-    id: generateId('spin'),
+  const eventType = isCorrect ? 'FASTEST_HAND_CORRECT' : 'FASTEST_HAND_WRONG';
+  const scoreRes = apiAddScoreEvent({
     sessionId: data.sessionId,
-    spinNumber: Number(data.spinNumber) || 1,
-    wheelType: data.wheelType || 'STUDENT',
-    selectedId: data.selectedId || '',
-    selectedName: sanitizeString(data.selectedName),
-    reward: data.reward || '',
-    points: Number(data.points) || 0,
-    createdAt: getCurrentTimestamp()
-  };
+    gameSlug: 'fastest-hand',
+    roundNumber: data.roundNumber,
+    questionId: data.questionId,
+    teamCode: data.teamCode,
+    teamId: data.teamId,
+    eventType: eventType,
+    eventKey: `${data.sessionId}_r${data.roundNumber}_${data.teamCode}_${eventType}`
+  });
 
-  appendObject(sheet, spinRecord);
-  appendLog('INFO', 'LUCKY_WHEEL', 'LUCKY_WHEEL_SPIN', `Spin selected: ${data.selectedName} (${data.reward || data.points + 'đ'})`, data.sessionId, spinRecord);
+  const points = (scoreRes.success && scoreRes.data) ? scoreRes.data.pointsAwarded : 0;
 
-  // If spin yields points and teamId is specified, add score event
-  if (data.points && Number(data.points) > 0 && data.teamCode) {
-    apiScoresAddEvent({
-      sessionId: data.sessionId,
-      gameSlug: 'lucky-wheel',
-      teamCode: data.teamCode,
-      eventType: 'WHEEL_REWARD',
-      points: Number(data.points),
-      eventKey: `wheel_${spinRecord.id}`
+  // Cập nhật FASTEST_HAND_RESULTS
+  const existing = findRowsByField(resultSheet, 'sessionId', data.sessionId);
+  const rRecord = existing.find(r => Number(r.data.roundNumber) === Number(data.roundNumber));
+  if (rRecord) {
+    updateObjectById(resultSheet, rRecord.data.id, {
+      answer: data.answer,
+      isCorrect: isCorrect,
+      pointsAwarded: points
     });
   }
 
-  return successResponse(spinRecord, 'Spin recorded');
+  return successResponse({
+    isCorrect: isCorrect,
+    pointsAwarded: points
+  }, isCorrect ? 'Chính xác! +10 điểm' : 'Chưa đúng!');
+}
+
+function apiFastestHandCompleteQuestion(data) {
+  return apiProgressCompleteQuestion(data);
+}
+
+function apiFastestHandListHistory(data) {
+  requireFields(data, ['sessionId']);
+  const sheet = getSheet('FASTEST_HAND_RESULTS');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse(rows);
+}
+
+// ==========================================
+// 18. API HANDLERS - LUCKY WHEEL
+// ==========================================
+
+function apiLuckyWheelAddSpin(data) {
+  requireFields(data, ['sessionId', 'wheelType']);
+  const sheet = getSheet('LUCKY_WHEEL_HISTORY');
+
+  const points = Number(data.points) || 0;
+  const record = {
+    id: generateId('wheel'),
+    sessionId: data.sessionId,
+    spinNumber: Number(data.spinNumber) || 1,
+    wheelType: data.wheelType,
+    selectedTeamId: data.selectedTeamId || '',
+    selectedTeamName: data.selectedTeamName || '',
+    selectedValue: data.selectedValue || '',
+    reward: data.reward || '',
+    points: points,
+    createdAt: getCurrentTimestamp()
+  };
+  appendObject(sheet, record);
+
+  // Nếu vòng quay thưởng điểm cho đội
+  if (points !== 0 && data.selectedTeamCode) {
+    apiAddScoreEvent({
+      sessionId: data.sessionId,
+      gameSlug: 'lucky-wheel',
+      teamCode: data.selectedTeamCode,
+      teamId: data.selectedTeamId,
+      eventType: 'WHEEL_REWARD',
+      points: points,
+      note: `Thưởng vòng quay may mắn: ${data.reward || data.selectedValue}`,
+      eventKey: `${data.sessionId}_spin${record.spinNumber}_${data.selectedTeamCode}`
+    });
+  }
+
+  appendLog('INFO', 'LUCKY_WHEEL', 'LUCKY_WHEEL_SPIN', `Quay trúng: ${record.selectedValue} (${record.selectedTeamName || 'Toàn trận'})`, data.sessionId, record);
+  return successResponse(record, 'Đã lưu lịch sử vòng quay may mắn');
 }
 
 function apiLuckyWheelListHistory(data) {
   requireFields(data, ['sessionId']);
   const sheet = getSheet('LUCKY_WHEEL_HISTORY');
-  const history = findRowsByField(sheet, 'sessionId', data.sessionId);
-  return successResponse(history, 'Lucky wheel history loaded');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse(rows);
 }
 
 // ==========================================
-// 21. RANDOM PICKER API
+// 19. API HANDLERS - RANDOM TEAM PICKER
 // ==========================================
 
-function apiRandomPickerAddPick(data) {
-  requireFields(data, ['sessionId', 'studentName']);
-  const sheet = getSheet('RANDOM_PICKER_HISTORY');
+function apiRandomTeamAddPick(data) {
+  requireFields(data, ['sessionId', 'selectedTeamName']);
+  const sheet = getSheet('RANDOM_TEAM_HISTORY');
 
-  const pickRecord = {
-    id: generateId('pick'),
+  const record = {
+    id: generateId('rand'),
     sessionId: data.sessionId,
-    studentId: data.studentId || '',
-    studentName: sanitizeString(data.studentName),
     pickNumber: Number(data.pickNumber) || 1,
-    excludedAfterPick: data.excludedAfterPick !== undefined ? data.excludedAfterPick : true,
+    pickType: data.pickType || 'TEAM',
+    selectedTeamId: data.selectedTeamId || '',
+    selectedTeamName: data.selectedTeamName,
+    selectedValue: data.selectedValue || data.selectedTeamName,
+    excludedAfterPick: Boolean(data.excludedAfterPick),
     pickedAt: getCurrentTimestamp()
   };
-
-  appendObject(sheet, pickRecord);
-  appendLog('INFO', 'RANDOM_PICKER', 'RANDOM_PICK', `Picked: ${data.studentName}`, data.sessionId, pickRecord);
-  return successResponse(pickRecord, 'Student pick recorded');
+  appendObject(sheet, record);
+  appendLog('INFO', 'RANDOM_PICKER', 'RANDOM_TEAM_PICK', `Bốc thăm ngẫu nhiên chọn: ${record.selectedTeamName}`, data.sessionId, record);
+  return successResponse(record, 'Đã lưu lượt bốc thăm');
 }
 
-function apiRandomPickerListHistory(data) {
+function apiRandomTeamListHistory(data) {
   requireFields(data, ['sessionId']);
-  const sheet = getSheet('RANDOM_PICKER_HISTORY');
-  const history = findRowsByField(sheet, 'sessionId', data.sessionId);
-  return successResponse(history, 'Random picker history loaded');
+  const sheet = getSheet('RANDOM_TEAM_HISTORY');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse(rows);
 }
 
-function apiRandomPickerResetSession(data) {
+function apiRandomTeamResetSession(data) {
   requireFields(data, ['sessionId']);
-  // Clear or return fresh status
-  return successResponse({ resetSessionId: data.sessionId }, 'Picker session reset');
+  const sheet = getSheet('RANDOM_TEAM_HISTORY');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId);
+  // Đánh dấu reset
+  appendLog('INFO', 'RANDOM_PICKER', 'RESET', `Reset bốc thăm ngẫu nhiên phiên ${data.sessionId}`, data.sessionId);
+  return successResponse({ reset: true, totalPicks: rows.length }, 'Đã khởi động lại lượt bốc thăm');
 }
 
 // ==========================================
-// 22. TEAM CHALLENGE API
+// 20. API HANDLERS - TEAM CHALLENGE
 // ==========================================
 
-function apiTeamChallengeAddScore(data) {
-  requireFields(data, ['sessionId', 'teamCode', 'points']);
-  data.gameSlug = 'team-challenge';
-  data.eventType = data.points >= 0 ? 'BONUS' : 'PENALTY';
-  return apiScoresAddEvent(data);
-}
+function apiTeamChallengeAddAnswer(data) {
+  requireFields(data, ['sessionId', 'teamId', 'answer']);
+  const questionSheet = getSheet('QUESTIONS');
+  const challengeSheet = getSheet('TEAM_CHALLENGE_RESULTS');
+  const teamSheet = getSheet('TEAMS');
 
-function apiTeamChallengeGetLeaderboard(data) {
-  requireFields(data, ['sessionId']);
-  const sheet = getSheet('TEAMS');
-  const teams = findRowsByField(sheet, 'sessionId', data.sessionId)
-    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
-  return successResponse(teams, 'Leaderboard retrieved');
-}
+  let isCorrect = false;
+  let points = 10;
 
-// ==========================================
-// 23. RESULTS & LEADERBOARD API
-// ==========================================
+  if (data.questionId) {
+    const qFound = findRowById(questionSheet, data.questionId);
+    if (qFound) {
+      isCorrect = String(data.answer).trim().toUpperCase() === String(qFound.data.correctAnswer).trim().toUpperCase();
+      points = isCorrect ? (Number(qFound.data.normalPoints) || 10) : 0;
+    }
+  } else {
+    isCorrect = data.isCorrect === true;
+    points = isCorrect ? (Number(data.points) || 10) : 0;
+  }
 
-function apiResultsCreate(data) {
-  requireFields(data, ['sessionId', 'teamId', 'finalScore']);
-  const sheet = getSheet('GAME_RESULTS');
+  const teamFound = findRowById(teamSheet, data.teamId);
+  const teamCode = teamFound ? teamFound.data.teamCode : 'TEAM';
 
-  const result = {
-    id: generateId('res'),
+  const eventType = isCorrect ? 'TEAM_CHALLENGE_CORRECT' : 'TEAM_CHALLENGE_WRONG';
+  apiAddScoreEvent({
     sessionId: data.sessionId,
-    gameSlug: data.gameSlug || 'cam-race',
+    gameSlug: 'team-challenge',
+    roundNumber: data.roundNumber || 1,
+    questionId: data.questionId,
     teamId: data.teamId,
-    teamName: data.teamName || '',
-    finalScore: Number(data.finalScore) || 0,
-    rank: Number(data.rank) || 1,
-    correctAnswers: Number(data.correctAnswers) || 0,
-    wrongAnswers: Number(data.wrongAnswers) || 0,
-    bonusPoints: Number(data.bonusPoints) || 0,
-    winner: data.winner === true,
-    statsJson: typeof data.stats === 'object' ? JSON.stringify(data.stats) : (data.statsJson || '{}'),
+    teamCode: teamCode,
+    eventType: eventType,
+    points: points,
+    eventKey: `${data.sessionId}_tc_r${data.roundNumber || 1}_${data.teamId}_${eventType}`
+  });
+
+  const record = {
+    id: generateId('tc'),
+    sessionId: data.sessionId,
+    roundNumber: Number(data.roundNumber) || 1,
+    questionId: data.questionId || '',
+    teamId: data.teamId,
+    teamCode: teamCode,
+    answer: data.answer,
+    isCorrect: isCorrect,
+    eventType: eventType,
+    pointsAwarded: points,
     createdAt: getCurrentTimestamp()
   };
+  appendObject(challengeSheet, record);
 
-  appendObject(sheet, result);
-  return successResponse(result, 'Game result created');
+  return successResponse(record, isCorrect ? 'Đội hoàn thành thử thách thành công!' : 'Thử thách chưa đạt.');
 }
 
-function apiResultsListBySession(data) {
+function apiTeamChallengeAddScore(data) {
+  requireFields(data, ['sessionId', 'teamId', 'points']);
+  const teamSheet = getSheet('TEAMS');
+  const teamFound = findRowById(teamSheet, data.teamId);
+  const teamCode = teamFound ? teamFound.data.teamCode : 'TEAM';
+
+  return apiAddScoreEvent({
+    sessionId: data.sessionId,
+    gameSlug: 'team-challenge',
+    teamId: data.teamId,
+    teamCode: teamCode,
+    eventType: Number(data.points) >= 0 ? 'BONUS' : 'PENALTY',
+    points: Number(data.points),
+    note: data.note || 'Thưởng điểm thử thách đồng đội'
+  });
+}
+
+function apiTeamChallengeCompleteRound(data) {
+  return apiProgressCompleteQuestion(data);
+}
+
+function apiTeamChallengeListHistory(data) {
+  requireFields(data, ['sessionId']);
+  const sheet = getSheet('TEAM_CHALLENGE_RESULTS');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse(rows);
+}
+
+// ==========================================
+// 21. FINISH SESSION & RANKING ENGINE
+// ==========================================
+
+function apiProgressCompleteQuestion(data) {
+  requireFields(data, ['sessionId']);
+  const sheet = getSheet('GAME_SESSIONS');
+  const found = findRowById(sheet, data.sessionId);
+  if (!found) return errorResponse('SESSION_NOT_FOUND', 'Không tìm thấy phiên thi đấu');
+
+  const session = found.data;
+  const currentQ = Number(session.currentQuestion) || 1;
+  const totalQ = Number(session.totalQuestions) || 15;
+  const nextQ = Math.min(currentQ + 1, totalQ);
+  const isFinished = currentQ >= totalQ;
+
+  updateObjectById(sheet, session.id, {
+    currentQuestion: nextQ,
+    status: isFinished ? 'PLAYING' : session.status
+  });
+
+  return successResponse({
+    currentQuestion: nextQ,
+    totalQuestions: totalQ,
+    isFinalQuestion: currentQ === totalQ,
+    readyToFinish: isFinished
+  }, `Đã hoàn tất câu ${currentQ}/${totalQ}`);
+}
+
+function apiFinishSession(data) {
+  requireFields(data, ['sessionId']);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+
+    const sessionSheet = getSheet('GAME_SESSIONS');
+    const teamSheet = getSheet('TEAMS');
+    const resultSheet = getSheet('GAME_RESULTS');
+
+    const sFound = findRowById(sessionSheet, data.sessionId);
+    if (!sFound) return errorResponse('SESSION_NOT_FOUND', 'Không tìm thấy phiên thi đấu');
+    const session = sFound.data;
+
+    // 1. Lấy danh sách đội và tính điểm
+    const teams = findRowsByField(teamSheet, 'sessionId', data.sessionId).map(r => r.data);
+    if (teams.length === 0) {
+      return errorResponse('NO_TEAMS', 'Phiên thi đấu chưa có đội nào.');
+    }
+
+    // 2. XỬ LÝ XẾP HẠNG & TIE-BREAKING
+    // Ưu tiên: 1. score DESC, 2. correctAnswers DESC, 3. specialCorrect DESC, 4. stealWins DESC
+    teams.sort((a, b) => {
+      const scoreDiff = (Number(b.score) || 0) - (Number(a.score) || 0);
+      if (scoreDiff !== 0) return scoreDiff;
+
+      const correctDiff = (Number(b.correctAnswers) || 0) - (Number(a.correctAnswers) || 0);
+      if (correctDiff !== 0) return correctDiff;
+
+      const specialDiff = (Number(b.specialCorrect) || 0) - (Number(a.specialCorrect) || 0);
+      if (specialDiff !== 0) return specialDiff;
+
+      return (Number(b.stealWins) || 0) - (Number(a.stealWins) || 0);
+    });
+
+    // 3. Cập nhật rank và ghi GAME_RESULTS
+    const gameResults = [];
+    teams.forEach((t, idx) => {
+      const rank = idx + 1;
+      const isWinner = rank === 1;
+
+      updateObjectById(teamSheet, t.id, { rank: rank });
+
+      const resObj = {
+        id: generateId('res'),
+        sessionId: session.id,
+        gameSlug: session.gameSlug,
+        teamId: t.id,
+        teamCode: t.teamCode,
+        teamName: t.teamName,
+        teamColor: t.teamColor,
+        finalScore: Number(t.score) || 0,
+        rank: rank,
+        correctAnswers: Number(t.correctAnswers) || 0,
+        wrongAnswers: Number(t.wrongAnswers) || 0,
+        stealWins: Number(t.stealWins) || 0,
+        bonusPoints: Number(t.bonusPoints) || 0,
+        penaltyPoints: Number(t.penaltyPoints) || 0,
+        specialCorrect: Number(t.specialCorrect) || 0,
+        winner: isWinner,
+        statsJson: JSON.stringify({
+          rankBadge: rank === 1 ? '🥇 Quán quân' : rank === 2 ? '🥈 Á quân' : rank === 3 ? '🥉 Quý quân' : '🏅 Khuyến khích',
+          accuracy: (Number(t.correctAnswers) || 0) + (Number(t.wrongAnswers) || 0) > 0
+            ? Math.round(((Number(t.correctAnswers) || 0) / ((Number(t.correctAnswers) || 0) + (Number(t.wrongAnswers) || 0))) * 100) + '%'
+            : '0%'
+        }),
+        createdAt: getCurrentTimestamp()
+      };
+      appendObject(resultSheet, resObj);
+      gameResults.push(resObj);
+    });
+
+    const winnerTeam = teams[0];
+
+    // 4. Cập nhật GAME_SESSIONS
+    updateObjectById(sessionSheet, session.id, {
+      winnerTeamId: winnerTeam.id,
+      winnerTeamName: winnerTeam.teamName,
+      status: 'FINISHED',
+      finishedAt: getCurrentTimestamp()
+    });
+
+    appendLog('INFO', 'SYSTEM', 'SESSION_FINISHED', `Trận đấu hoàn tất: Đội Vô địch: ${winnerTeam.teamName} (${winnerTeam.score} điểm)`, session.id, {
+      winnerTeamId: winnerTeam.id,
+      winnerScore: winnerTeam.score,
+      totalTeams: teams.length
+    });
+
+    return successResponse({
+      sessionId: session.id,
+      winnerTeam: winnerTeam,
+      leaderboard: gameResults
+    }, `Chúc mừng ${winnerTeam.teamName} đã giành chiến thắng chung cuộc!`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function apiListResultsBySession(data) {
   requireFields(data, ['sessionId']);
   const sheet = getSheet('GAME_RESULTS');
-  const results = findRowsByField(sheet, 'sessionId', data.sessionId)
-    .sort((a, b) => (Number(a.rank) || 0) - (Number(b.rank) || 0));
-  return successResponse(results, 'Results loaded');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  rows.sort((a, b) => Number(a.rank) - Number(b.rank));
+  return successResponse(rows);
 }
 
-function apiLeaderboardTop3(data) {
+function apiGetWinnerBySession(data) {
+  requireFields(data, ['sessionId']);
   const sheet = getSheet('GAME_RESULTS');
-  const headers = getHeaders(sheet);
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return successResponse([], 'No results');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  const winner = rows.find(r => r.winner === true || String(r.winner).toUpperCase() === 'TRUE');
+  if (!winner) return errorResponse('WINNER_NOT_FOUND', 'Chưa có kết quả quán quân');
+  return successResponse(winner);
+}
 
-  let rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues()
+function apiGetLeaderboardBySession(data) {
+  return apiListResultsBySession(data);
+}
+
+function apiGetTop3Leaderboard(data) {
+  const sheet = getSheet('GAME_RESULTS');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+  const headers = getHeaders(sheet);
+  let list = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues()
     .map(r => rowToObject(headers, r));
 
   if (data.gameSlug) {
-    rows = rows.filter(r => r.gameSlug === data.gameSlug);
+    list = list.filter(r => r.gameSlug === data.gameSlug);
   }
-
-  const top3 = rows
-    .sort((a, b) => (Number(b.finalScore) || 0) - (Number(a.finalScore) || 0))
-    .slice(0, 3);
-
-  return successResponse(top3, 'Top 3 retrieved');
+  list.sort((a, b) => (Number(b.finalScore) || 0) - (Number(a.finalScore) || 0));
+  return successResponse(list.slice(0, 3));
 }
 
 // ==========================================
-// 24. CERTIFICATES API
+// 22. CERTIFICATES API (TEAM-ONLY)
 // ==========================================
 
-function apiCertificatesCreate(data) {
-  requireFields(data, ['sessionId']);
+function apiCreateCertificate(data) {
+  requireFields(data, ['sessionId', 'teamId']);
   const certSheet = getSheet('CERTIFICATES');
-
-  // Check if certificate already issued for this session & recipient
   const sessionSheet = getSheet('GAME_SESSIONS');
-  const session = findRowById(sessionSheet, data.sessionId);
-  if (!session) return errorResponse('SESSION_NOT_FOUND', 'Session not found');
+  const teamSheet = getSheet('TEAMS');
 
-  const sData = session.data;
-  const recipientName = data.recipientName || sData.winnerName || 'Đội Xuất Sắc';
-  const awardTitle = data.awardTitle || 'QUÁN QUÂN EDUPLAY';
+  // 1. Kiểm tra tồn tại phiên & đội
+  const sFound = findRowById(sessionSheet, data.sessionId);
+  if (!sFound) return errorResponse('SESSION_NOT_FOUND', 'Không tìm thấy phiên chơi');
+  const session = sFound.data;
 
-  // Check duplicate certificate
-  const existingCerts = findRowsByField(certSheet, 'sessionId', data.sessionId);
-  const dup = existingCerts.find(c => c.recipientName === recipientName && c.awardTitle === awardTitle);
-  if (dup) {
-    return successResponse(dup, 'Chứng nhận đã được cấp trước đó');
+  const tFound = findRowById(teamSheet, data.teamId);
+  if (!tFound) return errorResponse('TEAM_NOT_FOUND', 'Không tìm thấy đội');
+  const team = tFound.data;
+
+  const awardTitle = data.awardTitle || (team.rank === 1 ? `${session.gameSlug.toUpperCase()} CHAMPION` : 'EDUPLAY HONORABLE AWARD');
+
+  // 2. Chống tạo trùng cùng (sessionId, teamId, awardTitle)
+  const existing = findRowsByField(certSheet, 'sessionId', data.sessionId);
+  const duplicate = existing.find(c => c.data.teamId === team.id && c.data.awardTitle === awardTitle);
+  if (duplicate) {
+    return successResponse(duplicate.data, 'Giấy chứng nhận cho đội đã tồn tại');
   }
 
-  const certCode = generateCertificateCode();
-  const cert = {
+  // 3. Sinh Certificate Code
+  const certCode = `EDUPLAY-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+
+  const certObj = {
     id: generateId('cert'),
-    sessionId: data.sessionId,
-    gameSlug: sData.gameSlug,
-    recipientType: data.recipientType || 'TEAM',
-    recipientId: data.recipientId || sData.winnerTeamId || '',
-    recipientName: recipientName,
+    sessionId: session.id,
+    gameSlug: session.gameSlug,
+    teamId: team.id,
+    teamCode: team.teamCode,
+    teamName: team.teamName,
     awardTitle: awardTitle,
-    score: Number(data.score) || 0,
-    rank: Number(data.rank) || 1,
-    teacherName: sData.teacherName,
-    className: sData.className,
-    schoolName: data.schoolName || 'Trường Tiểu học EDUPLAY',
+    finalScore: Number(team.score) || 0,
+    rank: Number(team.rank) || 1,
+    teacherName: session.teacherName || 'Giáo viên bộ môn',
+    className: session.className || '5A',
+    schoolName: session.schoolName || 'Trường Tiểu học',
     certificateCode: certCode,
     issuedAt: getCurrentTimestamp()
   };
 
-  appendObject(certSheet, cert);
-  appendLog('INFO', 'CERTIFICATE', 'CERTIFICATE_CREATED', `Certificate ${certCode} issued to ${recipientName}`, data.sessionId, cert);
-  return successResponse(cert, 'Certificate issued successfully');
+  appendObject(certSheet, certObj);
+  appendLog('INFO', 'CERTIFICATE', 'CERTIFICATE_CREATED', `Cấp chứng nhận ${awardTitle} cho ${team.teamName} (Mã: ${certCode})`, session.id, certObj);
+
+  return successResponse(certObj, 'Đã tạo giấy chứng nhận thành công cho Đội');
 }
 
-function apiCertificatesGetBySession(data) {
+function apiListCertificatesBySession(data) {
   requireFields(data, ['sessionId']);
   const sheet = getSheet('CERTIFICATES');
-  const certs = findRowsByField(sheet, 'sessionId', data.sessionId);
-  return successResponse(certs, 'Certificates loaded');
+  const rows = findRowsByField(sheet, 'sessionId', data.sessionId).map(r => r.data);
+  return successResponse(rows);
+}
+
+function apiGetCertificate(data) {
+  requireFields(data, ['id']);
+  const sheet = getSheet('CERTIFICATES');
+  const found = findRowById(sheet, data.id);
+  if (!found) return errorResponse('CERTIFICATE_NOT_FOUND', 'Không tìm thấy giấy chứng nhận');
+  return successResponse(found.data);
 }
 
 // ==========================================
-// 25. DATABASE SETUP & INITIALIZATION
-// (Kept for full standalone setup in Google Sheets)
+// 23. APP LOGS API
+// ==========================================
+
+function apiListAppLogs(data) {
+  const sheet = getSheet('APP_LOGS');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+  const headers = getHeaders(sheet);
+  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  let list = rows.map(r => rowToObject(headers, r)).reverse();
+
+  if (data.sessionId) {
+    list = list.filter(l => l.sessionId === data.sessionId);
+  }
+  if (data.level) {
+    list = list.filter(l => l.level === data.level);
+  }
+
+  return successResponse(list.slice(0, 100));
+}
+
+// ==========================================
+// 24. CORE SETUP DATABASE & MIGRATION
 // ==========================================
 
 function setupDatabase() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const startTime = new Date().getTime();
-  
-  Logger.log('🚀 Bắt đầu khởi tạo hệ sinh thái EDUPLAY Database...');
+  let createdCount = 0;
+  let updatedCount = 0;
 
-  // 1. Tạo và cấu hình 16 sheet
   Object.keys(EDUPLAY_SCHEMAS).forEach(sheetName => {
-    const headers = EDUPLAY_SCHEMAS[sheetName];
-    const sheet = getOrCreateSheet(ss, sheetName, headers);
-    ensureHeaders(sheet, headers);
-    formatSheetHeader(sheet, headers.length);
+    const expectedHeaders = EDUPLAY_SCHEMAS[sheetName];
+    const isNew = ss.getSheetByName(sheetName) === null;
+    const sheet = getOrCreateSheet(ss, sheetName, expectedHeaders);
+
+    ensureHeaders(sheet, expectedHeaders);
+    formatSheetHeader(sheet, expectedHeaders.length);
+
+    if (isNew) {
+      createdCount++;
+    } else {
+      updatedCount++;
+    }
   });
 
-  // 2. Áp dụng Data Validation cho các trường dữ liệu quan trọng
-  applyDataValidations(ss);
+  ensureDataValidation(ss);
 
-  // 3. Nạp dữ liệu cấu hình ban đầu
   seedSettings(ss);
   seedGameCatalog(ss);
   seedQuestionBanks(ss);
   seedQuestions(ss);
 
-  const durationSec = ((new Date().getTime() - startTime) / 1000).toFixed(2);
-  appendLog('INFO', 'DATABASE', 'SETUP', `Khởi tạo database EDUPLAY thành công trong ${durationSec}s`);
+  appendLog('INFO', 'SYSTEM', 'setupDatabase', `Khởi tạo/Cập nhật hoàn tất: ${createdCount} bảng mới, ${updatedCount} bảng cập nhật.`, '', {
+    createdCount: createdCount,
+    updatedCount: updatedCount,
+    totalSchemas: Object.keys(EDUPLAY_SCHEMAS).length
+  });
 
-  SpreadsheetApp.getUi().alert(
-    '🎉 EDUPLAY CLOUD DATABASE ĐÃ SẴN SÀNG!',
-    `Đã thiết lập đầy đủ 16 bảng dữ liệu, chuẩn hóa headers và nạp dữ liệu hạt giống (${durationSec}s).\n\n` +
-    '• 6 Game trong Catalog\n• 15 Câu hỏi trắc nghiệm Tin học 5\n• 13 Cấu hình tham số hệ thống\n• API Engine v3.0 đã kích hoạt!',
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
+  try {
+    const ui = SpreadsheetApp.getUi();
+    ui.alert(
+      '🎓 EDUPLAY - KHỞI TẠO DATABASE & API THÀNH CÔNG!',
+      `Đã chuẩn hóa thành công 18 bảng dữ liệu theo mô hình ĐỘI (2–4 đội):\n` +
+      `• Tạo mới: ${createdCount} bảng\n` +
+      `• Cập nhật cấu trúc: ${updatedCount} bảng\n` +
+      `• Đã nạp 6 game chính thức & 15 câu hỏi Tin học 5 chuẩn.\n` +
+      `• Web App REST API sẵn sàng phục vụ doGet / doPost.\n` +
+      `• Không quản lý học sinh (Students/Participants không sử dụng).`,
+      ui.ButtonSet.OK
+    );
+  } catch (e) {
+    Logger.log('Đã chạy xong setupDatabase');
+  }
 }
 
-function onOpen() {
-  const ui = SpreadsheetApp.getUi();
-  ui.createMenu('🎓 EDUPLAY')
-    .addItem('⚙️ Setup / Cập nhật Database (16 bảng)', 'setupDatabase')
-    .addSeparator()
-    .addItem('🎮 Nạp danh mục Game Catalog (6 game)', 'menuSeedCatalog')
-    .addItem('📝 Nạp 15 câu hỏi Tin học lớp 5', 'menuSeedQuestions')
-    .addItem('📚 Tạo lớp học và 10 học sinh Demo', 'seedDemoClass')
-    .addSeparator()
-    .addItem('📊 Xem thống kê tổng quan Database', 'showDatabaseStatistics')
-    .addToUi();
-}
-
-function menuSeedCatalog() {
+function migrateLegacyDatabase() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let logMessages = [];
+
+  const catalogSheet = ss.getSheetByName('GAME_CATALOG');
+  if (catalogSheet) {
+    const lastRow = catalogSheet.getLastRow();
+    if (lastRow > 1) {
+      const data = catalogSheet.getRange(2, 1, lastRow - 1, catalogSheet.getLastColumn()).getValues();
+      const headers = catalogSheet.getRange(1, 1, 1, catalogSheet.getLastColumn()).getValues()[0];
+      const slugCol = headers.indexOf('slug');
+      const enabledCol = headers.indexOf('enabled');
+      const updatedAtCol = headers.indexOf('updatedAt');
+
+      if (slugCol !== -1 && enabledCol !== -1) {
+        for (let i = 0; i < data.length; i++) {
+          const rowSlug = String(data[i][slugCol]);
+          if (rowSlug === 'quiz-battle' || rowSlug === 'quiz_battle') {
+            catalogSheet.getRange(i + 2, enabledCol + 1).setValue(false);
+            if (updatedAtCol !== -1) {
+              catalogSheet.getRange(i + 2, updatedAtCol + 1).setValue(getCurrentTimestamp());
+            }
+            logMessages.push('Đã vô hiệu hóa game cũ: quiz-battle (enabled = FALSE)');
+          }
+        }
+      }
+    }
+  }
+
   seedGameCatalog(ss);
-  SpreadsheetApp.getUi().alert('Đã cập nhật danh mục 6 trò chơi EDUPLAY!');
+  logMessages.push('Đã đồng bộ lại 6 game chính thức (kèm smile-race).');
+
+  const legacySheets = ['STUDENTS', 'PARTICIPANTS'];
+  legacySheets.forEach(name => {
+    const oldSheet = ss.getSheetByName(name);
+    if (oldSheet) {
+      logMessages.push(`Bảng cũ [${name}] được bảo lưu an toàn (không dùng trong logic mới).`);
+    }
+  });
+
+  appendLog('INFO', 'SYSTEM', 'migrateLegacyDatabase', 'Chạy migration hoàn tất.', '', logMessages);
+
+  try {
+    SpreadsheetApp.getUi().alert(
+      '🔄 MIGRATION HOÀN TẤT!',
+      logMessages.join('\n'),
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } catch (e) {
+    Logger.log('Migration completed: ' + JSON.stringify(logMessages));
+  }
 }
 
-function menuSeedQuestions() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  seedQuestions(ss);
-  SpreadsheetApp.getUi().alert('Đã cập nhật bộ 15 câu hỏi Tin học lớp 5 vào ngân hàng câu hỏi!');
-}
+// ==========================================
+// 25. FORMATTING & SEED HELPERS
+// ==========================================
 
 function getOrCreateSheet(ss, sheetName, headers) {
   let sheet = ss.getSheetByName(sheetName);
@@ -1965,10 +2338,73 @@ function formatSheetHeader(sheet, numColumns) {
   sheet.setRowHeight(1, 36);
   sheet.setFrozenRows(1);
 
-  const filter = sheet.getFilter();
-  if (!filter) {
-    sheet.getRange(1, 1, Math.max(sheet.getLastRow(), 2), numColumns).createFilter();
+  try {
+    const filter = sheet.getFilter();
+    if (!filter) {
+      sheet.getRange(1, 1, Math.max(sheet.getLastRow(), 2), numColumns).createFilter();
+    }
+  } catch (e) {}
+
+  for (let c = 1; c <= Math.min(numColumns, 20); c++) {
+    try {
+      sheet.autoResizeColumn(c);
+      if (sheet.getColumnWidth(c) < 80) {
+        sheet.setColumnWidth(c, 100);
+      }
+    } catch (err) {}
   }
+}
+
+function getCurrentTimestamp() {
+  return Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
+
+function generateId(prefix) {
+  const cleanPrefix = prefix ? (prefix.endsWith('_') ? prefix : prefix + '_') : '';
+  return cleanPrefix + Utilities.getUuid().replace(/-/g, '').substring(0, 16);
+}
+
+function generateSessionCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+function generateCertificateCode() {
+  const num = Math.floor(100000 + Math.random() * 900000);
+  return `EDUPLAY-2026-${num}`;
+}
+
+function appendLog(level, module, action, message, sessionId, payload) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('APP_LOGS');
+    if (!sheet) return;
+
+    const row = [
+      generateId('log'),
+      level || 'INFO',
+      module || 'SYSTEM',
+      action || '',
+      message || '',
+      sessionId || '',
+      payload ? (typeof payload === 'string' ? payload : JSON.stringify(payload)) : '',
+      getCurrentTimestamp()
+    ];
+    sheet.appendRow(row);
+  } catch (e) {
+    Logger.log('Không thể ghi log: ' + e.toString());
+  }
+}
+
+function getExistingColumnValues(sheet, columnIndex) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return [];
+  const range = sheet.getRange(2, columnIndex, lastRow - 1, 1);
+  return range.getValues().map(row => String(row[0])).filter(val => val !== '');
 }
 
 function seedSettings(ss) {
@@ -1979,16 +2415,23 @@ function seedSettings(ss) {
     { key: 'platformName', value: 'EDUPLAY', category: 'BRAND', description: 'Tên nền tảng tương tác lớp học' },
     { key: 'platformSubtitle', value: 'Hệ thống trò chơi tương tác lớp học', category: 'BRAND', description: 'Khẩu hiệu nền tảng' },
     { key: 'defaultLanguage', value: 'vi', category: 'LOCALIZATION', description: 'Ngôn ngữ mặc định (vi/en)' },
+    { key: 'minTeams', value: '2', category: 'GAMEPLAY', description: 'Số lượng đội tối thiểu' },
+    { key: 'maxTeams', value: '4', category: 'GAMEPLAY', description: 'Số lượng đội tối đa' },
     { key: 'defaultQuestionCount', value: '15', category: 'GAMEPLAY', description: 'Số lượng câu hỏi mặc định mỗi trận' },
     { key: 'defaultCorrectPoints', value: '10', category: 'GAMEPLAY', description: 'Điểm cộng khi trả lời đúng' },
-    { key: 'defaultStealPoints', value: '5', category: 'GAMEPLAY', description: 'Điểm cộng khi cướp câu trả lời đúng' },
-    { key: 'defaultSpecialPoints', value: '20', category: 'GAMEPLAY', description: 'Điểm cộng câu hỏi ngôi sao hi vọng' },
+    { key: 'defaultSpecialPoints', value: '20', category: 'GAMEPLAY', description: 'Điểm cộng câu hỏi ngôi sao đặc biệt' },
+    { key: 'defaultStealRatio', value: '0.5', category: 'GAMEPLAY', description: 'Tỉ lệ điểm cướp (10 -> 5, 20 -> 10)' },
     { key: 'defaultCountdownSeconds', value: '3', category: 'GAMEPLAY', description: 'Thời gian đếm ngược bắt đầu vòng thi (giây)' },
     { key: 'enableSound', value: 'TRUE', category: 'SYSTEM', description: 'Bật/tắt hiệu ứng âm thanh và nhạc nền' },
-    { key: 'enableAnimation', value: 'TRUE', category: 'SYSTEM', description: 'Bật/tắt hiệu ứng pháo hoa và motion' },
-    { key: 'enableCertificate', value: 'TRUE', category: 'SYSTEM', description: 'Tự động tạo chứng nhận khen thưởng' },
-    { key: 'camRaceTieThresholdMs', value: '200', category: 'CAM_RACE', description: 'Độ trễ mili-giây tối đa để coi là hòa giơ thẻ cùng lúc' },
-    { key: 'camRaceFreezeMs', value: '1500', category: 'CAM_RACE', description: 'Thời gian đóng băng sau khi nhận diện thành công (ms)' }
+    { key: 'enableAnimation', value: 'TRUE', category: 'SYSTEM', description: 'Bật/tắt hiệu ứng chuyển cảnh và pháo hoa' },
+    { key: 'enableCertificate', value: 'TRUE', category: 'SYSTEM', description: 'Tự động tạo giấy chứng nhận theo Đội' },
+    { key: 'camRaceTieThresholdMs', value: '200', category: 'CAM_RACE', description: 'Độ trễ mili-giây tối đa để tính hòa giơ thẻ' },
+    { key: 'camRaceFreezeMs', value: '1500', category: 'CAM_RACE', description: 'Thời gian đóng băng sau khi nhận diện thẻ (ms)' },
+    { key: 'smileRaceTieThresholdMs', value: '200', category: 'SMILE_RACE', description: 'Độ trễ mili-giây tối đa tính hòa nụ cười' },
+    { key: 'smileRaceGestureThreshold', value: '0.60', category: 'SMILE_RACE', description: 'Ngưỡng nụ cười mở rộng nhận diện' },
+    { key: 'smileRaceStableFrames', value: '4', category: 'SMILE_RACE', description: 'Số khung hình liên tiếp đạt chuẩn' },
+    { key: 'smileRaceMaxStealAttempts', value: '1', category: 'SMILE_RACE', description: 'Số lần cho phép cướp quyền trả lời' },
+    { key: 'fastestHandLockOnFirstBuzz', value: 'TRUE', category: 'FASTEST_HAND', description: 'Khóa chuông ngay sau lần bấm đầu tiên hợp lệ' }
   ];
 
   const existingKeys = getExistingColumnValues(sheet, 1);
@@ -2006,12 +2449,102 @@ function seedGameCatalog(ss) {
   if (!sheet) return;
 
   const catalog = [
-    { id: 'game_camrace', slug: 'cam-race', name: 'CAM RACE', description: 'Đại chiến Webcam: Nhận diện thẻ màu bằng AI Computer Vision.', category: 'Vận động & AI', minTeams: 2, maxTeams: 2, supportsQuestions: true, supportsCamera: true, supportsScore: true, supportsCertificate: true, enabled: true, featured: true, sortOrder: 1 },
-    { id: 'game_quizbattle', slug: 'quiz-battle', name: 'QUIZ BATTLE', description: 'Đấu trường Tri thức: Thi đấu đối kháng 2-4 đội trả lời câu hỏi trắc nghiệm.', category: 'Trí tuệ & Trắc nghiệm', minTeams: 2, maxTeams: 4, supportsQuestions: true, supportsCamera: false, supportsScore: true, supportsCertificate: true, enabled: true, featured: true, sortOrder: 2 },
-    { id: 'game_luckywheel', slug: 'lucky-wheel', name: 'LUCKY WHEEL', description: 'Vòng quay May mắn: Quay số chọn học sinh, tổ xuất sắc, tặng điểm thưởng.', category: 'May mắn & Hoạt náo', minTeams: 1, maxTeams: 8, supportsQuestions: false, supportsCamera: false, supportsScore: true, supportsCertificate: false, enabled: true, featured: true, sortOrder: 3 },
-    { id: 'game_fastesthand', slug: 'fastest-hand', name: 'FASTEST HAND', description: 'Ai nhanh hơn: Bấm chuông điện tử đo thời gian phản xạ (mili-giây).', category: 'Phản xạ & Tốc độ', minTeams: 2, maxTeams: 4, supportsQuestions: true, supportsCamera: false, supportsScore: true, supportsCertificate: true, enabled: true, featured: false, sortOrder: 4 },
-    { id: 'game_randompicker', slug: 'random-picker', name: 'RANDOM PICKER', description: 'Gọi tên ngẫu nhiên: Vòng quay tên học sinh công bằng, minh bạch.', category: 'Lựa chọn', minTeams: 1, maxTeams: 1, supportsQuestions: false, supportsCamera: false, supportsScore: false, supportsCertificate: false, enabled: true, featured: false, sortOrder: 5 },
-    { id: 'game_teamchallenge', slug: 'team-challenge', name: 'TEAM CHALLENGE', description: 'Thử thách đồng đội: Bảng điểm thi đua các tổ trên máy chiếu 16:9.', category: 'Thi đua nhóm', minTeams: 2, maxTeams: 6, supportsQuestions: false, supportsCamera: false, supportsScore: true, supportsCertificate: true, enabled: true, featured: false, sortOrder: 6 }
+    {
+      id: 'game_camrace',
+      slug: 'cam-race',
+      name: 'CAM RACE',
+      description: 'Đại chiến Webcam: Nhận diện thẻ màu BLUE / ORANGE bằng Computer Vision cực nhanh.',
+      category: 'Vận động & AI',
+      minTeams: 2,
+      maxTeams: 2,
+      supportsQuestions: true,
+      supportsCamera: true,
+      supportsScore: true,
+      supportsCertificate: true,
+      enabled: true,
+      featured: true,
+      sortOrder: 1
+    },
+    {
+      id: 'game_smilerace',
+      slug: 'smile-race',
+      name: 'SMILE RACE',
+      description: 'Đấu trường Nụ cười: Nhận diện nụ cười rạng rỡ của 2–4 đội qua camera phân vùng đa luồng.',
+      category: 'Vận động & AI',
+      minTeams: 2,
+      maxTeams: 4,
+      supportsQuestions: true,
+      supportsCamera: true,
+      supportsScore: true,
+      supportsCertificate: true,
+      enabled: true,
+      featured: true,
+      sortOrder: 2
+    },
+    {
+      id: 'game_luckywheel',
+      slug: 'lucky-wheel',
+      name: 'LUCKY WHEEL',
+      description: 'Vòng quay May mắn: Quay chọn đội trả lời, tặng điểm thưởng hoặc thử thách hoạt náo.',
+      category: 'May mắn & Hoạt náo',
+      minTeams: 2,
+      maxTeams: 4,
+      supportsQuestions: false,
+      supportsCamera: false,
+      supportsScore: true,
+      supportsCertificate: false,
+      enabled: true,
+      featured: true,
+      sortOrder: 3
+    },
+    {
+      id: 'game_fastesthand',
+      slug: 'fastest-hand',
+      name: 'FASTEST HAND',
+      description: 'Ai nhanh hơn: Bấm chuông điện tử đo thời gian phản xạ (mili-giây) chính xác giữa các đội.',
+      category: 'Phản xạ & Tốc độ',
+      minTeams: 2,
+      maxTeams: 4,
+      supportsQuestions: true,
+      supportsCamera: false,
+      supportsScore: true,
+      supportsCertificate: true,
+      enabled: true,
+      featured: false,
+      sortOrder: 4
+    },
+    {
+      id: 'game_randompicker',
+      slug: 'random-team-picker',
+      name: 'RANDOM TEAM PICKER',
+      description: 'Chọn đội ngẫu nhiên: Vòng quay và hiệu ứng bốc thăm chọn đội công bằng, minh bạch.',
+      category: 'Lựa chọn',
+      minTeams: 2,
+      maxTeams: 4,
+      supportsQuestions: false,
+      supportsCamera: false,
+      supportsScore: false,
+      supportsCertificate: false,
+      enabled: true,
+      featured: false,
+      sortOrder: 5
+    },
+    {
+      id: 'game_teamchallenge',
+      slug: 'team-challenge',
+      name: 'TEAM CHALLENGE',
+      description: 'Thử thách đồng đội: Bảng điểm thi đua các đội trực tiếp trên máy chiếu 16:9 sắc nét.',
+      category: 'Thi đua nhóm',
+      minTeams: 2,
+      maxTeams: 4,
+      supportsQuestions: false,
+      supportsCamera: false,
+      supportsScore: true,
+      supportsCertificate: true,
+      enabled: true,
+      featured: false,
+      sortOrder: 6
+    }
   ];
 
   const existingSlugs = getExistingColumnValues(sheet, 2);
@@ -2034,7 +2567,8 @@ function seedQuestionBanks(ss) {
 
   const defaultBank = {
     id: 'bank_tinhoc5_demo',
-    name: 'Tin học lớp 5 – Bộ câu hỏi chuẩn kiến thức',
+    bankCode: 'TINHOC5_DEMO',
+    name: 'Tin học lớp 5 – Bộ câu hỏi demo',
     subject: 'Tin học',
     grade: 5,
     topic: 'Tổng hợp kiến thức Tin học Tiểu học',
@@ -2046,9 +2580,10 @@ function seedQuestionBanks(ss) {
   const existingIds = getExistingColumnValues(sheet, 1);
   if (!existingIds.includes(defaultBank.id)) {
     const row = [
-      defaultBank.id, defaultBank.name, defaultBank.subject, defaultBank.grade,
-      defaultBank.topic, defaultBank.description, defaultBank.questionCount,
-      defaultBank.enabled, getCurrentTimestamp(), getCurrentTimestamp()
+      defaultBank.id, defaultBank.bankCode, defaultBank.name, defaultBank.subject,
+      defaultBank.grade, defaultBank.topic, defaultBank.description,
+      defaultBank.questionCount, defaultBank.enabled,
+      getCurrentTimestamp(), getCurrentTimestamp()
     ];
     sheet.appendRow(row);
   }
@@ -2059,33 +2594,271 @@ function seedQuestions(ss) {
   if (!sheet) return;
 
   const questionsList = [
-    { order: 1, topic: 'Máy tính & Phần cứng', questionType: 'multiple_choice', question: 'Thiết bị nào sau đây được dùng để nhập dữ liệu vào máy tính?', optionA: 'Màn hình máy tính', optionB: 'Bàn phím và chuột', optionC: 'Loa và tai nghe', optionD: 'Máy in màu', correctAnswer: 1, explanation: 'Bàn phím và chuột là thiết bị vào (input).', difficulty: 'EASY', isSpecial: false, tags: 'thiet_bi,phan_cung,lop5' },
-    { order: 2, topic: 'Tệp & Thư mục', questionType: 'multiple_choice', question: 'Trong máy tính, tệp tin thường được lưu trữ bên trong:', optionA: 'Thư mục (Folder)', optionB: 'Chuột máy tính', optionC: 'Dây nguồn', optionD: 'Bàn phím', correctAnswer: 0, explanation: 'Thư mục dùng để chứa và phân loại tệp tin.', difficulty: 'EASY', isSpecial: false, tags: 'tep,thu_muc' },
-    { order: 3, topic: 'Internet & Trình duyệt', questionType: 'multiple_choice', question: 'Phần mềm nào dưới đây là một trình duyệt web giúp em xem thông tin trên Internet?', optionA: 'Paint', optionB: 'Scratch 3.0', optionC: 'Google Chrome', optionD: 'Windows Media Player', correctAnswer: 2, explanation: 'Google Chrome là trình duyệt web phổ biến.', difficulty: 'EASY', isSpecial: false, tags: 'internet,trinh_duyet' },
-    { order: 4, topic: 'An toàn mạng & Mật khẩu', questionType: 'multiple_choice', question: 'Mật khẩu nào sau đây được coi là an toàn và khó bị đoán nhất?', optionA: '123456', optionB: 'tenem123', optionC: 'Lop5A@2026!#', optionD: '00000000', correctAnswer: 2, explanation: 'Mật khẩu mạnh kết hợp chữ hoa, chữ thường, số và ký tự đặc biệt.', difficulty: 'MEDIUM', isSpecial: false, tags: 'an_toan_mang,mat_khau' },
-    { order: 5, topic: 'Lập trình Scratch', questionType: 'multiple_choice', question: 'Trong phần mềm Scratch, nhân vật được gọi bằng thuật ngữ tiếng Anh là gì?', optionA: 'Backdrop', optionB: 'Sprite', optionC: 'Block', optionD: 'Stage', correctAnswer: 1, explanation: 'Sprite là đối tượng nhân vật trong Scratch.', difficulty: 'EASY', isSpecial: false, tags: 'scratch,sprite' },
-    { order: 6, topic: 'Lập trình Scratch', questionType: 'multiple_choice', question: 'Khối lệnh nào trong Scratch giúp nhân vật lặp lại một chuỗi hành động nhiều lần?', optionA: 'Khối lệnh [repeat / lặp lại]', optionB: 'Khối lệnh [say / nói]', optionC: 'Khối lệnh [stop / dừng lại]', optionD: 'Khối lệnh [next costume]', correctAnswer: 0, explanation: 'Khối lệnh [repeat] dùng để tạo vòng lặp.', difficulty: 'MEDIUM', isSpecial: false, tags: 'scratch,vong_lap' },
-    { order: 7, topic: 'Thông tin cá nhân', questionType: 'multiple_choice', question: 'Thông tin nào sau đây TUYỆT ĐỐI KHÔNG nên công khai cho người lạ trên mạng xã hội?', optionA: 'Tên bài hát em yêu thích', optionB: 'Màu sắc yêu thích', optionC: 'Địa chỉ nhà ở và mật khẩu tài khoản', optionD: 'Tên nhân vật hoạt hình', correctAnswer: 2, explanation: 'Địa chỉ nhà và mật khẩu là thông tin cá nhân tối mật.', difficulty: 'EASY', isSpecial: false, tags: 'thong_tin_ca_nhan,an_toan' },
-    { order: 8, topic: 'Thiết bị số', questionType: 'multiple_choice', question: 'Thiết bị nào sau đây là thiết bị lưu trữ dữ liệu di động phổ biến?', optionA: 'Bàn phím cơ', optionB: 'Thẻ nhớ / Ổ USB flash drive', optionC: 'Máy quét (Scanner)', optionD: 'Microphone', correctAnswer: 1, explanation: 'USB và thẻ nhớ là thiết bị lưu trữ di động.', difficulty: 'EASY', isSpecial: false, tags: 'thiet_bi_so,usb' },
-    { order: 9, topic: 'Tệp & Đuôi mở rộng', questionType: 'multiple_choice', question: 'Tệp có phần mở rộng là .docx hoặc .doc thường là loại tệp gì?', optionA: 'Tệp video', optionB: 'Tệp âm thanh', optionC: 'Tệp văn bản Word', optionD: 'Tệp hình ảnh', correctAnswer: 2, explanation: '.docx là định dạng tệp văn bản chuẩn Microsoft Word.', difficulty: 'MEDIUM', isSpecial: false, tags: 'tep,duoi_mo_rong' },
-    { order: 10, topic: 'Lập trình & Thuật toán', questionType: 'multiple_choice', question: '★ [CÂU ĐẶC BIỆT] Khi gặp khối lệnh [Forever] (Liên tục) trong Scratch, khối lệnh bên trong sẽ:', optionA: 'Chỉ thực hiện đúng 1 lần', optionB: 'Thực hiện lặp lại mãi mãi cho đến khi dừng chương trình', optionC: 'Biến mất khỏi màn hình', optionD: 'Báo lỗi và tắt máy', correctAnswer: 1, explanation: 'Forever là vòng lặp vô hạn.', difficulty: 'HARD', isSpecial: true, tags: 'scratch,vong_lap,dac_biet' },
-    { order: 11, topic: 'An toàn mạng', questionType: 'multiple_choice', question: 'Khi đang lướt web, bất ngờ xuất hiện thông báo "Bạn trúng thưởng 100 triệu", em nên làm gì?', optionA: 'Bấm vào ngay để nhận thưởng', optionB: 'Chia sẻ cho bạn bè', optionC: 'Không bấm vào liên kết lạ, đóng trang web và báo thầy cô/bố mẹ', optionD: 'Nhập số điện thoại', correctAnswer: 2, explanation: 'Đó là chiêu trò lừa đảo trực tuyến nguy hiểm.', difficulty: 'MEDIUM', isSpecial: false, tags: 'an_toan_mang,lua_dao' },
-    { order: 12, topic: 'Thiết bị số & Bản quyền', questionType: 'multiple_choice', question: 'Hành động nào thể hiện văn hóa ứng xử văn minh và tôn trọng bản quyền số?', optionA: 'Tự nhận sản phẩm của người khác là của mình', optionB: 'Ghi rõ nguồn tác giả khi sử dụng hình ảnh tham khảo', optionC: 'Tải phần mềm lậu', optionD: 'Đăng bình luận khiếm nhã', correctAnswer: 1, explanation: 'Ghi rõ nguồn tác giả là tôn trọng bản quyền trí tuệ.', difficulty: 'MEDIUM', isSpecial: false, tags: 'ban_quyen,van_hoa_so' },
-    { order: 13, topic: 'Lập trình Scratch', questionType: 'multiple_choice', question: 'Để nhân vật mèo Scratch kêu tiếng "Meow", ta dùng khối lệnh nhóm nào?', optionA: 'Âm thanh (Sound)', optionB: 'Bút vẽ (Pen)', optionC: 'Cảm biến (Sensing)', optionD: 'Các phép toán', correctAnswer: 0, explanation: 'Nhóm Sound phát âm thanh.', difficulty: 'EASY', isSpecial: false, tags: 'scratch,am_thanh' },
-    { order: 14, topic: 'Máy tính & Hệ điều hành', questionType: 'multiple_choice', question: 'Phần mềm nền tảng quản lý toàn bộ phần cứng và phần mềm máy tính được gọi là gì?', optionA: 'Hệ điều hành (Ví dụ: Windows, macOS)', optionB: 'Phần mềm chơi game', optionC: 'Bộ gõ Unikey', optionD: 'Trình phát video', correctAnswer: 0, explanation: 'Hệ điều hành quản trị toàn bộ tài nguyên máy tính.', difficulty: 'MEDIUM', isSpecial: false, tags: 'he_dieu_hanh,windows' },
-    { order: 15, topic: 'Tư duy máy tính & Thuật toán', questionType: 'multiple_choice', question: '★ [CÂU ĐẶC BIỆT] Trong lập trình, khái niệm "Thuật toán" (Algorithm) có thể hiểu là:', optionA: 'Một chiếc máy tính rất mạnh', optionB: 'Dãy các bước rõ ràng, tuần tự để giải quyết vấn đề', optionC: 'Một lỗi bàn phím', optionD: 'Mật khẩu wifi', correctAnswer: 1, explanation: 'Thuật toán là tập hợp hữu hạn các chỉ dẫn rõ ràng theo trình tự.', difficulty: 'HARD', isSpecial: true, tags: 'thuat_toan,tu_duy,dac_biet' }
+    {
+      order: 1,
+      topic: 'Máy tính & Phần cứng',
+      questionType: 'multiple_choice',
+      question: 'Thiết bị nào sau đây được dùng để nhập dữ liệu vào máy tính?',
+      optionA: 'Màn hình máy tính',
+      optionB: 'Bàn phím và chuột',
+      optionC: 'Loa và tai nghe',
+      optionD: 'Máy in màu',
+      correctAnswer: 'B',
+      explanation: 'Bàn phím và chuột là thiết bị vào (input) truyền thông tin vào máy tính.',
+      difficulty: 'EASY',
+      isSpecial: false,
+      tags: 'thiet_bi,phan_cung,lop5'
+    },
+    {
+      order: 2,
+      topic: 'Tệp & Thư mục',
+      questionType: 'multiple_choice',
+      question: 'Trong máy tính, tệp tin thường được lưu trữ bên trong:',
+      optionA: 'Thư mục (Folder)',
+      optionB: 'Chuột máy tính',
+      optionC: 'Dây nguồn',
+      optionD: 'Bàn phím',
+      correctAnswer: 'A',
+      explanation: 'Thư mục (Folder) dùng để lưu trữ và phân loại các tệp tin một cách khoa học.',
+      difficulty: 'EASY',
+      isSpecial: false,
+      tags: 'tep,thu_muc'
+    },
+    {
+      order: 3,
+      topic: 'Internet & Trình duyệt',
+      questionType: 'multiple_choice',
+      question: 'Phần mềm nào dưới đây là một trình duyệt web giúp em xem thông tin trên Internet?',
+      optionA: 'Paint',
+      optionB: 'Scratch 3.0',
+      optionC: 'Google Chrome',
+      optionD: 'Windows Media Player',
+      correctAnswer: 'C',
+      explanation: 'Google Chrome là trình duyệt web giúp truy cập các trang mạng trên Internet.',
+      difficulty: 'EASY',
+      isSpecial: false,
+      tags: 'internet,trinh_duyet'
+    },
+    {
+      order: 4,
+      topic: 'An toàn mạng & Mật khẩu',
+      questionType: 'multiple_choice',
+      question: 'Mật khẩu nào sau đây được coi là an toàn và khó bị đoán nhất?',
+      optionA: '123456',
+      optionB: 'tenem123',
+      optionC: 'Lop5A@2026!#',
+      optionD: '00000000',
+      correctAnswer: 'C',
+      explanation: 'Mật khẩu mạnh bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt.',
+      difficulty: 'MEDIUM',
+      isSpecial: false,
+      tags: 'an_toan_mang,mat_khau'
+    },
+    {
+      order: 5,
+      topic: 'Lập trình Scratch',
+      questionType: 'multiple_choice',
+      question: 'Trong phần mềm Scratch, nhân vật được gọi bằng thuật ngữ tiếng Anh là gì?',
+      optionA: 'Backdrop',
+      optionB: 'Sprite',
+      optionC: 'Block',
+      optionD: 'Stage',
+      correctAnswer: 'B',
+      explanation: 'Sprite là từ dùng để chỉ nhân vật chuyển động trong phần mềm Scratch.',
+      difficulty: 'EASY',
+      isSpecial: false,
+      tags: 'scratch,sprite'
+    },
+    {
+      order: 6,
+      topic: 'Lập trình Scratch',
+      questionType: 'multiple_choice',
+      question: 'Khối lệnh nào trong Scratch giúp nhân vật lặp lại một chuỗi hành động nhiều lần?',
+      optionA: 'Khối lệnh [repeat / lặp lại]',
+      optionB: 'Khối lệnh [say / nói]',
+      optionC: 'Khối lệnh [stop / dừng lại]',
+      optionD: 'Khối lệnh [next costume]',
+      correctAnswer: 'A',
+      explanation: 'Khối lệnh [repeat] dùng để tạo vòng lặp hữu hạn hành động.',
+      difficulty: 'MEDIUM',
+      isSpecial: false,
+      tags: 'scratch,vong_lap'
+    },
+    {
+      order: 7,
+      topic: 'Thông tin cá nhân',
+      questionType: 'multiple_choice',
+      question: 'Thông tin nào sau đây TUYỆT ĐỐI KHÔNG nên công khai cho người lạ trên mạng xã hội?',
+      optionA: 'Tên bài hát em yêu thích',
+      optionB: 'Màu sắc yêu thích',
+      optionC: 'Địa chỉ nhà ở và mật khẩu tài khoản',
+      optionD: 'Tên nhân vật hoạt hình',
+      correctAnswer: 'C',
+      explanation: 'Địa chỉ nhà ở và mật khẩu là thông tin bảo mật tuyệt đối, không được chia sẻ.',
+      difficulty: 'EASY',
+      isSpecial: false,
+      tags: 'thong_tin_ca_nhan,an_toan'
+    },
+    {
+      order: 8,
+      topic: 'Thiết bị số',
+      questionType: 'multiple_choice',
+      question: 'Thiết bị nào sau đây là thiết bị lưu trữ dữ liệu di động phổ biến?',
+      optionA: 'Bàn phím cơ',
+      optionB: 'Thẻ nhớ / Ổ USB flash drive',
+      optionC: 'Máy quét (Scanner)',
+      optionD: 'Microphone',
+      correctAnswer: 'B',
+      explanation: 'USB và thẻ nhớ là thiết bị lưu trữ dữ liệu di động nhỏ gọn.',
+      difficulty: 'EASY',
+      isSpecial: false,
+      tags: 'thiet_bi_so,usb'
+    },
+    {
+      order: 9,
+      topic: 'Tệp & Đuôi mở rộng',
+      questionType: 'multiple_choice',
+      question: 'Tệp có phần mở rộng là .docx hoặc .doc thường là loại tệp gì?',
+      optionA: 'Tệp video',
+      optionB: 'Tệp âm thanh',
+      optionC: 'Tệp văn bản Word',
+      optionD: 'Tệp hình ảnh',
+      correctAnswer: 'C',
+      explanation: '.docx là định dạng tệp tài liệu văn bản Microsoft Word.',
+      difficulty: 'MEDIUM',
+      isSpecial: false,
+      tags: 'tep,duoi_mo_rong'
+    },
+    {
+      order: 10,
+      topic: 'Lập trình & Thuật toán',
+      questionType: 'multiple_choice',
+      question: '★ [CÂU ĐẶC BIỆT] Khi gặp khối lệnh [Forever] (Liên tục) trong Scratch, khối lệnh bên trong sẽ:',
+      optionA: 'Chỉ thực hiện đúng 1 lần',
+      optionB: 'Thực hiện lặp lại mãi mãi cho đến khi dừng chương trình',
+      optionC: 'Biến mất khỏi màn hình',
+      optionD: 'Báo lỗi và tắt máy',
+      correctAnswer: 'B',
+      explanation: 'Forever là vòng lặp vô hạn, lệnh lặp lại liên tục cho đến khi nhấn nút đỏ dừng lại.',
+      difficulty: 'HARD',
+      isSpecial: true,
+      tags: 'scratch,vong_lap,dac_biet'
+    },
+    {
+      order: 11,
+      topic: 'An toàn mạng',
+      questionType: 'multiple_choice',
+      question: 'Khi đang lướt web, bất ngờ xuất hiện thông báo "Bạn trúng thưởng 100 triệu", em nên làm gì?',
+      optionA: 'Bấm vào ngay để nhận thưởng',
+      optionB: 'Chia sẻ cho bạn bè',
+      optionC: 'Không bấm vào liên kết lạ, đóng trang web và báo thầy cô/bố mẹ',
+      optionD: 'Nhập số điện thoại',
+      correctAnswer: 'C',
+      explanation: 'Đó là chiêu trò lừa đảo qua mạng, tuyệt đối không click hay cung cấp thông tin.',
+      difficulty: 'MEDIUM',
+      isSpecial: false,
+      tags: 'an_toan_mang,lua_dao'
+    },
+    {
+      order: 12,
+      topic: 'Thiết bị số & Bản quyền',
+      questionType: 'multiple_choice',
+      question: 'Hành động nào thể hiện văn hóa ứng xử văn minh và tôn trọng bản quyền số?',
+      optionA: 'Tự nhận sản phẩm của người khác là của mình',
+      optionB: 'Ghi rõ nguồn tác giả khi sử dụng hình ảnh tham khảo',
+      optionC: 'Tải phần mềm lậu',
+      optionD: 'Đăng bình luận khiếm nhã',
+      correctAnswer: 'B',
+      explanation: 'Ghi rõ nguồn tác giả là biểu hiện của sự tôn trọng quyền sở hữu trí tuệ.',
+      difficulty: 'MEDIUM',
+      isSpecial: false,
+      tags: 'ban_quyen,van_hoa_so'
+    },
+    {
+      order: 13,
+      topic: 'Lập trình Scratch',
+      questionType: 'multiple_choice',
+      question: 'Để nhân vật mèo Scratch kêu tiếng "Meow", ta dùng khối lệnh thuộc nhóm nào?',
+      optionA: 'Âm thanh (Sound)',
+      optionB: 'Bút vẽ (Pen)',
+      optionC: 'Cảm biến (Sensing)',
+      optionD: 'Các phép toán',
+      correctAnswer: 'A',
+      explanation: 'Nhóm Sound quản lý phát các tệp âm thanh trong Scratch.',
+      difficulty: 'EASY',
+      isSpecial: false,
+      tags: 'scratch,am_thanh'
+    },
+    {
+      order: 14,
+      topic: 'Máy tính & Hệ điều hành',
+      questionType: 'multiple_choice',
+      question: 'Phần mềm nền tảng quản lý toàn bộ phần cứng và phần mềm máy tính được gọi là gì?',
+      optionA: 'Hệ điều hành (Ví dụ: Windows, macOS)',
+      optionB: 'Phần mềm chơi game',
+      optionC: 'Bộ gõ Unikey',
+      optionD: 'Trình phát video',
+      correctAnswer: 'A',
+      explanation: 'Hệ điều hành quản trị toàn bộ hoạt động của thiết bị phần cứng và phần mềm.',
+      difficulty: 'MEDIUM',
+      isSpecial: false,
+      tags: 'he_dieu_hanh,windows'
+    },
+    {
+      order: 15,
+      topic: 'Tư duy máy tính & Thuật toán',
+      questionType: 'multiple_choice',
+      question: '★ [CÂU ĐẶC BIỆT] Trong lập trình, khái niệm "Thuật toán" (Algorithm) có thể hiểu là:',
+      optionA: 'Một chiếc máy tính rất mạnh',
+      optionB: 'Dãy các bước rõ ràng, tuần tự để giải quyết một bài toán hay nhiệm vụ',
+      optionC: 'Một lỗi bàn phím',
+      optionD: 'Mật khẩu wifi',
+      correctAnswer: 'B',
+      explanation: 'Thuật toán là tập hợp các chỉ dẫn hữu hạn, rõ ràng, được thực hiện theo trình tự.',
+      difficulty: 'HARD',
+      isSpecial: true,
+      tags: 'thuat_toan,tu_duy,dac_biet'
+    }
   ];
 
   const bankId = 'bank_tinhoc5_demo';
-  const existingOrders = getExistingQuestionOrders(sheet, bankId);
+  const lastRow = sheet.getLastRow();
+  const existingOrders = [];
+
+  if (lastRow > 1) {
+    const range = sheet.getRange(2, 2, lastRow - 1, 2);
+    range.getValues().forEach(row => {
+      if (row[0] === bankId && row[1] !== '') {
+        existingOrders.push(Number(row[1]));
+      }
+    });
+  }
 
   const toAdd = questionsList
     .filter(q => !existingOrders.includes(q.order))
     .map(q => [
-      generateId('q'), bankId, q.order, 'Tin học', 5, q.topic, q.questionType,
-      q.question, q.optionA, q.optionB, q.optionC, q.optionD, q.correctAnswer,
-      q.explanation, q.difficulty, 10, 5, 20, q.isSpecial, true, q.tags,
-      getCurrentTimestamp(), getCurrentTimestamp()
+      generateId('q'),
+      bankId,
+      q.order,
+      'Tin học',
+      5,
+      q.topic,
+      q.questionType,
+      q.question,
+      q.optionA,
+      q.optionB,
+      q.optionC,
+      q.optionD,
+      q.correctAnswer,
+      q.explanation,
+      q.difficulty,
+      10, // normalPoints
+      20, // specialPoints
+      q.isSpecial,
+      true, // enabled
+      q.tags,
+      getCurrentTimestamp(),
+      getCurrentTimestamp()
     ]);
 
   if (toAdd.length > 0) {
@@ -2093,65 +2866,25 @@ function seedQuestions(ss) {
   }
 }
 
-function seedDemoClass() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const classSheet = ss.getSheetByName('CLASSES');
-  const studentSheet = ss.getSheetByName('STUDENTS');
-  if (!classSheet || !studentSheet) return;
-
-  const demoClassId = 'class_5a_demo';
-  const existingClasses = getExistingColumnValues(classSheet, 1);
-
-  if (!existingClasses.includes(demoClassId)) {
-    const classRow = [
-      demoClassId, '5A', 'Lớp 5A', 5, '2025-2026', 'Thầy/Cô Giáo viên Tin học',
-      'Trường Tiểu học EDUPLAY', 'Tin học', 10, true,
-      getCurrentTimestamp(), getCurrentTimestamp()
-    ];
-    classSheet.appendRow(classRow);
-  }
-
-  const existingStudents = getExistingColumnValues(studentSheet, 3);
-  const newStudents = [];
-
-  for (let i = 1; i <= 10; i++) {
-    const code = `HS5A_${i < 10 ? '0' + i : i}`;
-    if (!existingStudents.includes(code)) {
-      const groupNum = ((i - 1) % 4) + 1;
-      newStudents.push([
-        generateId('st'), demoClassId, code,
-        `Học sinh ${i < 10 ? '0' + i : i}`, `HS ${i < 10 ? '0' + i : i}`,
-        `Tổ ${groupNum}`, i % 2 === 1 ? 'BLUE' : 'ORANGE', true,
-        getCurrentTimestamp(), getCurrentTimestamp()
-      ]);
-    }
-  }
-
-  if (newStudents.length > 0) {
-    studentSheet.getRange(studentSheet.getLastRow() + 1, 1, newStudents.length, newStudents[0].length).setValues(newStudents);
-  }
-
-  SpreadsheetApp.getUi().alert(
-    '📚 ĐÃ TẠO LỚP HỌC DEMO THÀNH CÔNG!',
-    'Đã thêm "Lớp 5A" và 10 bạn học sinh mẫu (HS 01 -> HS 10) chia đều vào các tổ và 2 đội Blue/Orange.',
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
-}
-
-function applyDataValidations(ss) {
+function ensureDataValidation(ss) {
   try {
-    setBooleanValidation(ss, 'GAME_CATALOG', ['H', 'I', 'J', 'K', 'L', 'M']);
-    setBooleanValidation(ss, 'CLASSES', ['J']);
-    setBooleanValidation(ss, 'STUDENTS', ['H']);
+    setListValidation(ss, 'GAME_SESSIONS', 'M', ['2', '3', '4']);
+    setListValidation(ss, 'GAME_SESSIONS', 'N', ['READY', 'PLAYING', 'PAUSED', 'FINISHED', 'CANCELLED']);
+
     setListValidation(ss, 'QUESTIONS', 'G', ['multiple_choice', 'true_false', 'short_answer', 'fill_blank', 'sorting', 'drag_drop']);
     setListValidation(ss, 'QUESTIONS', 'O', ['EASY', 'MEDIUM', 'HARD']);
-    setBooleanValidation(ss, 'QUESTIONS', ['S', 'T']);
-    setListValidation(ss, 'GAME_SESSIONS', 'L', ['READY', 'PLAYING', 'PAUSED', 'FINISHED', 'CANCELLED']);
-    setListValidation(ss, 'CAM_RACE_RESULTS', 'E', ['BLUE', 'ORANGE', 'TIE', 'NONE']);
-    setListValidation(ss, 'CAM_RACE_RESULTS', 'K', ['CAMERA', 'MANUAL']);
-    setListValidation(ss, 'LUCKY_WHEEL_HISTORY', 'D', ['STUDENT', 'TEAM', 'QUESTION', 'REWARD', 'CHALLENGE']);
-    setListValidation(ss, 'SCORE_EVENTS', 'I', ['CORRECT', 'WRONG', 'RACE_CORRECT', 'RACE_WRONG', 'STEAL_CORRECT', 'STEAL_WRONG', 'SPECIAL_CORRECT', 'BONUS', 'PENALTY', 'MANUAL_ADJUSTMENT', 'WHEEL_REWARD']);
-    setListValidation(ss, 'CERTIFICATES', 'D', ['TEAM', 'STUDENT', 'CLASS']);
+    setBooleanValidation(ss, 'QUESTIONS', ['R', 'S']);
+
+    setListValidation(ss, 'CAM_RACE_RESULTS', 'L', ['CAMERA', 'MANUAL']);
+    setListValidation(ss, 'SMILE_RACE_RESULTS', 'M', ['CAMERA', 'MANUAL']);
+
+    setListValidation(ss, 'LUCKY_WHEEL_HISTORY', 'D', ['TEAM', 'QUESTION', 'REWARD', 'CHALLENGE', 'POINTS']);
+    setListValidation(ss, 'RANDOM_TEAM_HISTORY', 'D', ['TEAM', 'QUESTION', 'CHALLENGE', 'REWARD']);
+
+    setListValidation(ss, 'IMPORT_HISTORY', 'B', ['QUESTIONS', 'TEAMS']);
+    setListValidation(ss, 'IMPORT_HISTORY', 'D', ['CSV', 'XLSX', 'XLS']);
+    setListValidation(ss, 'IMPORT_HISTORY', 'K', ['CREATE', 'SKIP', 'UPDATE']);
+
     setListValidation(ss, 'APP_LOGS', 'B', ['INFO', 'WARNING', 'ERROR']);
   } catch (e) {
     Logger.log('Validation setup error: ' + e.toString());
@@ -2174,33 +2907,41 @@ function setBooleanValidation(ss, sheetName, columnLetters) {
   });
 }
 
-function getExistingColumnValues(sheet, columnIndex) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return [];
-  const range = sheet.getRange(2, columnIndex, lastRow - 1, 1);
-  return range.getValues().map(row => String(row[0])).filter(val => val !== '');
-}
-
-function getExistingQuestionOrders(sheet, bankId) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return [];
-  const range = sheet.getRange(2, 2, lastRow - 1, 2);
-  const orders = [];
-  range.getValues().forEach(row => {
-    if (row[0] === bankId && row[1] !== '') {
-      orders.push(Number(row[1]));
-    }
-  });
-  return orders;
-}
-
-function showDatabaseStatistics() {
+function showDatabaseSummary() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let statsMessage = '📊 THỐNG KÊ BẢN GHI EDUPLAY:\n\n';
-  Object.keys(EDUPLAY_SCHEMAS).forEach(name => {
-    const sheet = ss.getSheetByName(name);
+  let summary = '📊 TỔNG QUAN HỆ THỐNG EDUPLAY (THEO ĐỘI):\n\n';
+
+  const metrics = [
+    { label: 'Trò chơi (Games)', sheet: 'GAME_CATALOG' },
+    { label: 'Lớp học (Classes)', sheet: 'CLASSES' },
+    { label: 'Ngân hàng câu hỏi (Banks)', sheet: 'QUESTION_BANKS' },
+    { label: 'Câu hỏi (Questions)', sheet: 'QUESTIONS' },
+    { label: 'Phiên chơi (Game Sessions)', sheet: 'GAME_SESSIONS' },
+    { label: 'Đội thi đấu (Teams)', sheet: 'TEAMS' },
+    { label: 'Sự kiện điểm (Score Events)', sheet: 'SCORE_EVENTS' },
+    { label: 'Kết quả trận (Game Results)', sheet: 'GAME_RESULTS' },
+    { label: 'Kết quả Cam Race', sheet: 'CAM_RACE_RESULTS' },
+    { label: 'Kết quả Smile Race', sheet: 'SMILE_RACE_RESULTS' },
+    { label: 'Kết quả Fastest Hand', sheet: 'FASTEST_HAND_RESULTS' },
+    { label: 'Lịch sử Vòng quay (Lucky Wheel)', sheet: 'LUCKY_WHEEL_HISTORY' },
+    { label: 'Lịch sử Bốc thăm (Random Team)', sheet: 'RANDOM_TEAM_HISTORY' },
+    { label: 'Kết quả Team Challenge', sheet: 'TEAM_CHALLENGE_RESULTS' },
+    { label: 'Giấy chứng nhận (Certificates)', sheet: 'CERTIFICATES' },
+    { label: 'Lịch sử Import dữ liệu', sheet: 'IMPORT_HISTORY' },
+    { label: 'Nhật ký ứng dụng (App Logs)', sheet: 'APP_LOGS' }
+  ];
+
+  metrics.forEach(m => {
+    const sheet = ss.getSheetByName(m.sheet);
     const count = sheet ? Math.max(0, sheet.getLastRow() - 1) : 'Chưa tạo';
-    statsMessage += `• ${name.padEnd(22, ' ')}: ${count} dòng\n`;
+    summary += `• ${m.label.padEnd(30, ' ')}: ${count} bản ghi\n`;
   });
-  SpreadsheetApp.getUi().alert('TỔNG QUAN HỆ THỐNG EDUPLAY', statsMessage, SpreadsheetApp.getUi().ButtonSet.OK);
+
+  summary += '\n* Chế độ: Quản lý Đội độc lập (2-4 Đội), bảo vệ tính riêng tư học sinh.';
+
+  try {
+    SpreadsheetApp.getUi().alert('TỔNG QUAN DATABASE EDUPLAY', summary, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    Logger.log(summary);
+  }
 }

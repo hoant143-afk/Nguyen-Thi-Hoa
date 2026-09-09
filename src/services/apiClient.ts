@@ -342,3 +342,13 @@ class EduplayApiClient {
 }
 
 export const apiClient = new EduplayApiClient();
+
+/**
+ * Direct standalone function export matching specification:
+ * apiRequest(action, data, options)
+ */
+export const apiRequest = <T = any>(
+  action: string,
+  data?: any,
+  options?: ApiRequestOptions
+): Promise<ApiResponse<T>> => apiClient.apiRequest<T>(action, data, options);
