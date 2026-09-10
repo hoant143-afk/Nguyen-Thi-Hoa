@@ -18,6 +18,7 @@ import {
   GraduationCap,
   ChevronRight,
   Eye,
+  Upload,
 } from 'lucide-react';
 import { GameSession, GameSettings, QuestionBankLesson } from '../types';
 import { useCamera } from '../hooks/useCamera';
@@ -25,6 +26,7 @@ import { analyzeVideoFrame } from '../utils/colorDetection';
 import { soundService } from '../services/soundService';
 import { QuestionBankRepository } from '../repositories/questionBankRepository';
 import { QuestionBankSelector } from './common/QuestionBankSelector';
+import { QuestionImportModal } from './common/QuestionImportModal';
 
 interface HomeScreenProps {
   initialSession: GameSession | null;
@@ -56,6 +58,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return QuestionBankRepository.getSelectedLesson();
   });
   const [showBankModal, setShowBankModal] = useState<boolean>(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [blueTeamName, setBlueTeamName] = useState<string>(initialSession?.blueTeamName || 'BLUE TECH');
   const [orangeTeamName, setOrangeTeamName] = useState<string>(initialSession?.orangeTeamName || 'ORANGE CODE');
   const [className, setClassName] = useState<string>(initialSession?.className || '5A1');
@@ -322,18 +325,33 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  soundService.playClick();
-                  setShowBankModal(true);
-                }}
-                className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/25 transition-all uppercase tracking-wide shrink-0"
-              >
-                <Layers className="w-3.5 h-3.5 stroke-[3]" />
-                <span>Đổi Bài Học Khác (Khối 1 - 9)</span>
-                <ChevronRight className="w-3.5 h-3.5 stroke-[3]" />
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setShowBankModal(true);
+                  }}
+                  className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/25 transition-all uppercase tracking-wide shrink-0"
+                >
+                  <Layers className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Đổi Bài Học Khác (Khối 1 - 9)</span>
+                  <ChevronRight className="w-3.5 h-3.5 stroke-[3]" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setShowImportModal(true);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/25 transition-all uppercase tracking-wide shrink-0"
+                  title="Tải lên tệp CSV/Excel để tạo bài học mới ngay"
+                >
+                  <Upload className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span>Tải Lên Tệp</span>
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -544,6 +562,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             />
           </div>
         </div>
+      )}
+      {/* QUESTION IMPORT MODAL */}
+      {showImportModal && (
+        <QuestionImportModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          currentQuestions={selectedLesson.questions}
+          initialGrade={selectedLesson.grade}
+          initialSubject={selectedLesson.subject}
+          saveAsLesson={true}
+          onImportLessonSuccess={(newLesson) => {
+            setSelectedLesson(newLesson);
+            setClassName((prev) => {
+              if (/^[1-9]A\d+$/.test(prev) || prev === '5A1') {
+                return `${newLesson.grade}A1`;
+              }
+              return prev;
+            });
+            setShowImportModal(false);
+          }}
+          onImportSuccess={() => {}}
+        />
       )}
     </div>
   );

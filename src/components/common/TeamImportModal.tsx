@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   Upload,
   FileSpreadsheet,
@@ -9,10 +9,10 @@ import {
   X,
   Download,
   Users,
-  Palette,
-  RefreshCw,
+  Layers,
   Trash2,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { parseCsv } from '../../services/importer/csvParser';
 import { extractSheetData, readExcelWorkbook } from '../../services/importer/excelParser';
 import {
@@ -31,24 +31,35 @@ interface TeamImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onApplyTeams: (
-    teams: { name: string; color: string; badge?: string }[]
+    teams: { name: string; color: string; markerColor?: string; badge?: string }[]
   ) => void;
+  initialFile?: File | null;
 }
 
 export const TeamImportModal: React.FC<TeamImportModalProps> = ({
   isOpen,
   onClose,
   onApplyTeams,
+  initialFile = null,
 }) => {
   const [file, setFile] = useState<File | null>(null);
-  const [fileInfo, setFileInfo] = useState<{ name: string; size: string; type: string } | null>(null);
+  const [fileInfo, setFileInfo] = useState<{
+    name: string;
+    size: string;
+    type: string;
+    rowsCount: number;
+  } | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [parsedTeams, setParsedTeams] = useState<TeamImportItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Multi-sheet Excel state
+  const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
+  const [availableSheets, setAvailableSheets] = useState<string[]>([]);
+  const [activeSheet, setActiveSheet] = useState<string>('');
 
-  if (!isOpen) return null;
+  const modalFileInputRef = useRef<HTMLInputElement>(null);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -60,62 +71,131 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
     setFile(null);
     setFileInfo(null);
     setParsedTeams([]);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    setErrorMessage(null);
+    setWorkbook(null);
+    setAvailableSheets([]);
+    setActiveSheet('');
+    if (modalFileInputRef.current) modalFileInputRef.current.value = '';
   };
 
   const processUploadedFile = async (selectedFile: File) => {
+    if (!selectedFile) return;
+
     try {
       setIsProcessing(true);
-      soundService.playClick();
+      setErrorMessage(null);
       setFile(selectedFile);
 
-      const isCsv = selectedFile.name.toLowerCase().endsWith('.csv');
-      const isXlsx = selectedFile.name.toLowerCase().endsWith('.xlsx');
-      const isXls = selectedFile.name.toLowerCase().endsWith('.xls');
+      const ext = selectedFile.name.slice(selectedFile.name.lastIndexOf('.')).toLowerCase();
+      const isCsv = ext === '.csv';
+      const isXlsx = ext === '.xlsx';
+      const isXls = ext === '.xls';
 
       if (!isCsv && !isXlsx && !isXls) {
-        alert('Vui lòng chọn tệp .csv, .xlsx hoặc .xls');
-        setIsProcessing(false);
-        return;
+        throw new Error('❌ Định dạng file không được hỗ trợ. Vui lòng chọn tệp .csv, .xlsx hoặc .xls');
+      }
+
+      let rawRows: Record<string, any>[] = [];
+      const typeStr = isCsv ? 'CSV' : isXlsx ? 'Excel (.xlsx)' : 'Excel (.xls)';
+
+      if (isCsv) {
+        let text = '';
+        try {
+          text = await selectedFile.text();
+        } catch (err: any) {
+          throw new Error('❌ Không thể đọc file.');
+        }
+
+        const parsed = parseCsv(text);
+        rawRows = parsed.rows;
+        setWorkbook(null);
+        setAvailableSheets([]);
+        setActiveSheet('');
+      } else {
+        // Read Excel
+        let arrayBuffer: ArrayBuffer;
+        try {
+          arrayBuffer = await selectedFile.arrayBuffer();
+        } catch (err: any) {
+          throw new Error('❌ Không thể đọc file.');
+        }
+
+        let wbInfo: { workbook: XLSX.WorkBook; sheetNames: string[] };
+        try {
+          wbInfo = readExcelWorkbook(arrayBuffer);
+        } catch (err: any) {
+          throw new Error(`❌ Có lỗi khi đọc Excel: ${err?.message || 'Tệp Excel bị lỗi hoặc không thể phân tích.'}`);
+        }
+
+        if (!wbInfo.sheetNames || wbInfo.sheetNames.length === 0) {
+          throw new Error('❌ File không có dữ liệu đội.');
+        }
+
+        setWorkbook(wbInfo.workbook);
+        setAvailableSheets(wbInfo.sheetNames);
+
+        // Auto select first sheet
+        const firstSheet = wbInfo.sheetNames[0];
+        setActiveSheet(firstSheet);
+        const sheetData = extractSheetData(wbInfo.workbook, firstSheet);
+        rawRows = sheetData.rows;
       }
 
       setFileInfo({
         name: selectedFile.name,
         size: formatFileSize(selectedFile.size),
-        type: isCsv ? 'CSV' : isXlsx ? 'Excel (.xlsx)' : 'Excel (.xls)',
+        type: typeStr,
+        rowsCount: rawRows.length,
       });
 
-      let rawRows: Record<string, any>[] = [];
-
-      if (isCsv) {
-        const text = await selectedFile.text();
-        const parsed = parseCsv(text);
-        rawRows = parsed.rows;
-      } else {
-        const arrayBuffer = await selectedFile.arrayBuffer();
-        const wbInfo = readExcelWorkbook(arrayBuffer);
-        if (wbInfo.sheetNames.length > 0) {
-          const sheetData = extractSheetData(wbInfo.workbook, wbInfo.sheetNames[0]);
-          rawRows = sheetData.rows;
-        }
-      }
-
+      // Parse and validate team rows
       const teams = parseTeamRows(rawRows);
-      if (teams.length === 0) {
-        alert('Không tìm thấy danh sách đội trong tệp.');
-        handleResetFile();
-        return;
-      }
-
       setParsedTeams(teams);
+      soundService.playCorrect();
     } catch (err: any) {
-      console.error('Lỗi khi đọc file đội:', err);
-      alert(`Không thể đọc tệp: ${err.message || 'Tệp bị lỗi'}`);
-      handleResetFile();
+      const msg = err.message || '❌ Không thể đọc file.';
+      setErrorMessage(msg);
+      alert(msg);
     } finally {
       setIsProcessing(false);
     }
   };
+
+  // Change active Excel sheet
+  const handleSelectSheet = (sheetName: string) => {
+    if (!workbook) return;
+    try {
+      soundService.playClick();
+      setActiveSheet(sheetName);
+      setErrorMessage(null);
+
+      const sheetData = extractSheetData(workbook, sheetName);
+      if (fileInfo) {
+        setFileInfo({
+          ...fileInfo,
+          rowsCount: sheetData.rows.length,
+        });
+      }
+
+      const teams = parseTeamRows(sheetData.rows);
+      setParsedTeams(teams);
+    } catch (err: any) {
+      const msg = err.message || '❌ Có lỗi khi đọc dữ liệu sheet này.';
+      setErrorMessage(msg);
+      setParsedTeams([]);
+    }
+  };
+
+  // Load initial file if passed from outside
+  useEffect(() => {
+    if (isOpen && initialFile) {
+      processUploadedFile(initialFile);
+    } else if (!isOpen) {
+      handleResetFile();
+    }
+  }, [isOpen, initialFile]);
+
+  if (!isOpen) return null;
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -162,7 +242,11 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
 
   const handleApply = () => {
     if (!isSelectionValid) {
-      alert('Vui lòng chọn từ 2 đến 4 đội để thi đấu.');
+      alert(
+        selectedCount < 2
+          ? 'Cần tối thiểu 2 đội để tham gia thi đấu.'
+          : 'Hệ thống EDUPLAY hỗ trợ tối đa 4 đội thi đấu (2, 3 hoặc 4 đội).'
+      );
       return;
     }
     soundService.playClick();
@@ -181,6 +265,7 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
       selectedTeams.map((t) => ({
         name: t.teamName,
         color: t.teamColor,
+        markerColor: t.markerColor || t.teamColor,
         badge: t.badge,
       }))
     );
@@ -188,8 +273,14 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700/80 w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+    <div
+      id="team-import-modal-overlay"
+      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+    >
+      <div
+        id="team-import-modal-card"
+        className="bg-slate-900 border border-slate-700/80 w-full max-w-3xl rounded-3xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
+      >
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0">
           <div className="flex items-center gap-3">
@@ -198,11 +289,12 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
-                <span>Nhập Đội Thi Đấu Từ CSV / Excel</span>
+                <span>📥 NHẬP ĐỘI TỪ CSV / EXCEL</span>
               </h2>
               <p className="text-xs text-slate-400">
-                Cấu trúc: <code className="text-amber-300">teamName</code>,{' '}
-                <code className="text-amber-300">teamColor</code> (Chọn từ 2 đến 4 đội)
+                Hỗ trợ <code className="text-amber-300">teamName</code>,{' '}
+                <code className="text-amber-300">teamColor</code>,{' '}
+                <code className="text-amber-300">markerColor</code> (chọn từ 2 đến 4 đội)
               </p>
             </div>
           </div>
@@ -237,6 +329,7 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
             </div>
 
             <button
+              id="team-import-close-btn"
               type="button"
               onClick={() => {
                 soundService.playClick();
@@ -251,12 +344,25 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {/* Error Message Alert */}
+          {errorMessage && (
+            <div className="p-4 bg-rose-950/80 border border-rose-500/60 rounded-2xl text-rose-200 text-xs flex items-start gap-3 shadow-lg">
+              <AlertCircle className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-bold text-sm text-rose-300">{errorMessage}</p>
+                <p className="text-[11px] text-rose-200/80 mt-1">
+                  Vui lòng kiểm tra lại cấu trúc tệp hoặc tải tệp mẫu CSV / Excel ở góc trên bên phải để đối chiếu.
+                </p>
+              </div>
+            </div>
+          )}
+
           {!file ? (
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => modalFileInputRef.current?.click()}
               className={`border-2 border-dashed rounded-3xl p-8 text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-3 ${
                 isDragging
                   ? 'border-amber-400 bg-amber-950/20 scale-[0.99]'
@@ -264,9 +370,9 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
               }`}
             >
               <input
-                ref={fileInputRef}
+                ref={modalFileInputRef}
                 type="file"
-                accept=".csv, .xlsx, .xls, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel, text/csv"
+                accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
                 className="hidden"
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
@@ -283,137 +389,230 @@ export const TeamImportModal: React.FC<TeamImportModalProps> = ({
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">Hỗ trợ .CSV, .XLSX, .XLS</p>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Ví dụ: <code>Sao Xanh,#2563EB</code> | <code>Tia Chớp,#F97316</code>
+                  Ví dụ: <code>Đội Tia Chớp,#2563EB,#2563EB</code> | <code>Đội Mặt Trời,#F97316,#F97316</code>
                 </p>
               </div>
             </div>
           ) : (
             <div className="space-y-4">
-              {/* File Info */}
+              {/* File Info Bar */}
               <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400">
-                    <FileSpreadsheet className="w-4 h-4" />
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                    <FileSpreadsheet className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="text-xs font-bold text-white">{fileInfo?.name}</span>
-                    <span className="text-[10px] text-slate-500 ml-2">({fileInfo?.size})</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-white">{fileInfo?.name}</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 border border-slate-700">
+                        {fileInfo?.type}
+                      </span>
+                      <span className="text-[10px] text-slate-400">({fileInfo?.size})</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-400 font-medium mt-0.5">
+                      ✓ Đã đọc {fileInfo?.rowsCount || 0} dòng dữ liệu ({parsedTeams.length} đội hợp lệ)
+                    </p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={handleResetFile}
-                  className="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 cursor-pointer"
+                  className="px-3 py-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors shrink-0"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Chọn tệp khác</span>
                 </button>
               </div>
 
+              {/* Multi-sheet Excel Selector */}
+              {availableSheets.length > 1 && (
+                <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-amber-300 uppercase tracking-wider">
+                    <Layers className="w-4 h-4" />
+                    <span>CHỌN SHEET CẦN NHẬP:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {availableSheets.map((sheetName) => {
+                      const isActive = activeSheet === sheetName;
+                      return (
+                        <button
+                          key={sheetName}
+                          type="button"
+                          onClick={() => handleSelectSheet(sheetName)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            isActive
+                              ? 'bg-amber-500 text-slate-950 font-black shadow-md scale-[1.02]'
+                              : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>{sheetName}</span>
+                          {isActive && <CheckCircle2 className="w-3.5 h-3.5 stroke-[3]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Warning if > 4 teams */}
               {parsedTeams.length > 4 && (
                 <div className="p-3 bg-amber-950/60 border border-amber-500/40 rounded-2xl text-amber-300 text-xs flex items-start gap-2.5">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
                   <div>
-                    <p className="font-bold">File có {parsedTeams.length} đội (Hệ thống EDUPLAY hỗ trợ tối đa 4 đội).</p>
+                    <p className="font-bold">
+                      File có {parsedTeams.length} đội. Vui lòng chọn tối đa 4 đội để tham gia.
+                    </p>
                     <p className="text-[11px] text-amber-300/80 mt-0.5">
-                      Vui lòng tick chọn từ <strong>2 đến 4 đội</strong> ở danh sách bên dưới mà thầy/cô muốn sử dụng cho trận đấu.
+                      EDUPLAY chỉ hỗ trợ <strong>2, 3 hoặc 4 đội</strong>. Thầy/cô vui lòng tick chọn các đội tham gia ở bảng bên dưới.
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Teams Selection List */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-300 uppercase">
-                    Danh sách đội nhận diện ({selectedCount}/4 đã chọn)
-                  </span>
-                  <span
-                    className={`text-[11px] font-bold ${
-                      isSelectionValid ? 'text-emerald-400' : 'text-rose-400'
-                    }`}
-                  >
-                    {isSelectionValid ? '✓ Số lượng đội hợp lệ (2-4 đội)' : '⚠️ Cần chọn 2, 3 hoặc 4 đội'}
-                  </span>
+              {/* Warning if < 2 teams */}
+              {parsedTeams.length === 1 && (
+                <div className="p-3 bg-rose-950/60 border border-rose-500/40 rounded-2xl text-rose-300 text-xs flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                  <div>
+                    <p className="font-bold">File chỉ có 1 đội. Cần tối thiểu 2 đội để tham gia thi đấu.</p>
+                  </div>
                 </div>
+              )}
 
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {parsedTeams.map((team, idx) => (
-                    <div
-                      key={team.id}
-                      onClick={() => handleToggleSelectTeam(team.id)}
-                      style={{ borderColor: team.selected ? `${team.teamColor}aa` : undefined }}
-                      className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                        team.selected
-                          ? 'bg-slate-950/90 border-2'
-                          : 'bg-slate-950/40 border-slate-800 opacity-60 hover:opacity-100'
+              {/* PREVIEW TABLE (Requirement 6 & 7) */}
+              {parsedTeams.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      BẢNG XEM TRƯỚC DANH SÁCH ĐỘI ({selectedCount}/4 đã chọn)
+                    </span>
+                    <span
+                      className={`text-[11px] font-bold ${
+                        isSelectionValid ? 'text-emerald-400' : 'text-rose-400'
                       }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={team.selected}
-                          onChange={() => {}}
-                          className="w-4 h-4 accent-amber-500 cursor-pointer rounded"
-                        />
-                        <span
-                          style={{ backgroundColor: team.teamColor }}
-                          className="w-5 h-5 rounded-full inline-block shadow-sm"
-                        />
-                        <div>
-                          <p className="text-xs font-black uppercase text-white tracking-wide">
-                            {team.teamName}
-                          </p>
-                          <p className="text-[10px] text-slate-400 font-mono">
-                            Màu: {team.teamColor}
-                          </p>
-                        </div>
-                      </div>
+                      {isSelectionValid
+                        ? `✓ Hợp lệ (${selectedCount} đội)`
+                        : selectedCount < 2
+                        ? '⚠️ Cần chọn tối thiểu 2 đội'
+                        : '⚠️ Không chọn quá 4 đội'}
+                    </span>
+                  </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">{team.badge}</span>
-                        {team.error && (
-                          <span className="text-[10px] text-amber-400 max-w-xs truncate" title={team.error}>
-                            ⚠️ {team.error}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                  <div className="overflow-x-auto border border-slate-800 rounded-2xl max-h-72 overflow-y-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-[11px] font-black uppercase text-slate-400 bg-slate-950/80 sticky top-0 z-10">
+                          <th className="py-2.5 px-3 w-12 text-center">CHỌN</th>
+                          <th className="py-2.5 px-3 w-12 text-center">STT</th>
+                          <th className="py-2.5 px-4">TÊN ĐỘI</th>
+                          <th className="py-2.5 px-4">MÀU ĐỘI</th>
+                          <th className="py-2.5 px-4">MÀU THẺ</th>
+                          <th className="py-2.5 px-3 text-center">TRẠNG THÁI</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 text-xs">
+                        {parsedTeams.map((team, idx) => (
+                          <tr
+                            key={team.id}
+                            onClick={() => handleToggleSelectTeam(team.id)}
+                            className={`cursor-pointer transition-colors ${
+                              team.selected
+                                ? 'bg-amber-500/10'
+                                : 'hover:bg-slate-950/40 opacity-60'
+                            }`}
+                          >
+                            <td className="py-2.5 px-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={team.selected}
+                                onChange={() => {}}
+                                className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                              />
+                            </td>
+                            <td className="py-2.5 px-3 text-center font-bold text-slate-400">
+                              {idx + 1}
+                            </td>
+                            <td className="py-2.5 px-4 font-black text-white uppercase tracking-wide">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{team.badge}</span>
+                                <span>{team.teamName}</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-4 font-mono text-[11px]">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  style={{ backgroundColor: team.teamColor }}
+                                  className="w-4 h-4 rounded-full border border-white/20 inline-block shrink-0 shadow-xs"
+                                />
+                                <span className="text-slate-300 font-bold">{team.teamColor}</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-4 font-mono text-[11px]">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  style={{ backgroundColor: team.markerColor || team.teamColor }}
+                                  className="w-4 h-4 rounded-md border border-white/20 inline-block shrink-0 shadow-xs"
+                                />
+                                <span className="text-slate-300 font-bold">{team.markerColor || team.teamColor}</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              {team.isValid ? (
+                                <span className="inline-flex items-center gap-1 text-emerald-400 font-bold text-xs bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                                  ✅ Hợp lệ
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-flex items-center gap-1 text-rose-400 font-bold text-xs bg-rose-950/60 px-2.5 py-0.5 rounded-full border border-rose-500/30"
+                                  title={team.error}
+                                >
+                                  ⚠️ {team.error || 'Lỗi'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer Buttons (Requirement 6) */}
         <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between gap-3 shrink-0">
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-slate-400 font-medium">
             {selectedCount >= 2 && selectedCount <= 4
-              ? `Đã chọn ${selectedCount} đội thi đấu`
-              : 'Chọn tối thiểu 2 đội, tối đa 4 đội'}
+              ? `Đã chọn ${selectedCount} đội thi đấu (2-4 đội)`
+              : 'Yêu cầu chọn tối thiểu 2 đội, tối đa 4 đội'}
           </span>
 
           <div className="flex items-center gap-2">
             <button
+              id="team-import-cancel-btn"
               type="button"
               onClick={() => {
                 soundService.playClick();
                 onClose();
               }}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
+              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer flex items-center gap-1.5"
             >
-              HỦY
+              <X className="w-4 h-4" />
+              <span>❌ HỦY</span>
             </button>
             <button
+              id="team-import-confirm-btn"
               type="button"
-              disabled={!isSelectionValid}
+              disabled={!isSelectionValid || isProcessing}
               onClick={handleApply}
               className="px-5 py-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 disabled:opacity-40 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg cursor-pointer transition-all flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-4 h-4 stroke-[3]" />
-              <span>ÁP DỤNG ({selectedCount} ĐỘI)</span>
+              <span>✅ XÁC NHẬN NHẬP ({selectedCount} ĐỘI)</span>
             </button>
           </div>
         </div>

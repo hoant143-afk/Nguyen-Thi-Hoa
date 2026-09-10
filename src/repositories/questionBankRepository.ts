@@ -1,5 +1,6 @@
 import { QuestionBankLesson, GradeLevel, Question } from '../types';
 import { DEFAULT_QUESTION_BANKS, SUBJECTS_BY_GRADE } from '../data/questionBanksData';
+import { EduplayStorage } from '../services/eduplayStorage';
 
 const STORAGE_KEYS = {
   LESSONS: 'eduplay_question_bank_lessons_v1',
@@ -97,6 +98,11 @@ export class QuestionBankRepository {
       all.push(lesson);
     }
     this.saveAllLessons(all);
+
+    // If this lesson is currently active, sync questions to EduplayStorage
+    if (this.getSelectedLessonId() === lesson.id && lesson.questions && lesson.questions.length > 0) {
+      EduplayStorage.saveQuestions(lesson.questions);
+    }
   }
 
   /**
@@ -166,6 +172,10 @@ export class QuestionBankRepository {
   public static setSelectedLessonId(id: string): void {
     try {
       localStorage.setItem(STORAGE_KEYS.SELECTED_LESSON_ID, id);
+      const lesson = this.getLessonById(id);
+      if (lesson && lesson.questions && lesson.questions.length > 0) {
+        EduplayStorage.saveQuestions(lesson.questions);
+      }
     } catch (e) {
       console.error('Error saving selected lesson ID', e);
     }

@@ -16,8 +16,9 @@ import {
   Palette,
   Award,
   Upload,
+  BookOpen,
 } from 'lucide-react';
-import { Question, Team, TeamCount } from '../../types';
+import { Question, Team, TeamCount, QuestionBankLesson } from '../../types';
 import { EduplayStorage, STORAGE_NAMESPACES } from '../../services/eduplayStorage';
 import { soundService } from '../../services/soundService';
 import { TeamScoreboard } from '../../components/common/TeamScoreboard';
@@ -26,14 +27,26 @@ import { SessionsRepository } from '../../repositories/sessionsRepository';
 import { ScoresRepository } from '../../repositories/scoresRepository';
 import { apiClient } from '../../services/apiClient';
 import { TeamImportModal } from '../../components/common/TeamImportModal';
+import { QuestionBankRepository } from '../../repositories/questionBankRepository';
+import { QuestionBankSelector } from '../../components/common/QuestionBankSelector';
+import { QuestionImportModal } from '../../components/common/QuestionImportModal';
 
 interface QuizBattleGameProps {
   onBackToEduplay: () => void;
 }
 
 export const QuizBattleGame: React.FC<QuizBattleGameProps> = ({ onBackToEduplay }) => {
-  const [questions, setQuestions] = useState<Question[]>(() => EduplayStorage.getQuestions());
+  const [selectedLesson, setSelectedLesson] = useState<QuestionBankLesson>(() => {
+    return QuestionBankRepository.getSelectedLesson();
+  });
+  const [questions, setQuestions] = useState<Question[]>(() => {
+    const active = QuestionBankRepository.getSelectedLesson();
+    return active?.questions && active.questions.length > 0 ? active.questions : EduplayStorage.getQuestions();
+  });
   const [currentQIndex, setCurrentQIndex] = useState<number>(0);
+
+  const [showBankModal, setShowBankModal] = useState<boolean>(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
   // 2, 3, or 4 teams configuration
   const [teamCount, setTeamCount] = useState<TeamCount>(3);
@@ -439,9 +452,59 @@ export const QuizBattleGame: React.FC<QuizBattleGameProps> = ({ onBackToEduplay 
               </div>
             </div>
 
-            <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800 flex items-center justify-between text-xs text-slate-300">
-              <span>Số câu hỏi: <strong className="text-amber-400 font-bold">{questions.length} câu</strong></span>
-              <span>Thời gian/câu: <strong className="text-cyan-400 font-bold">20 giây</strong></span>
+            {/* LESSON & QUESTION SET SELECTOR */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                    <BookOpen className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <span>BỘ CÂU HỎI THI ĐẤU:</span>
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/40 font-bold">
+                        Khối {selectedLesson.grade} • {selectedLesson.subject}
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-amber-300 mt-0.5">
+                      {selectedLesson.lessonTitle}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundService.playClick();
+                      setShowBankModal(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    title="Chọn bài học khác từ Ngân hàng câu hỏi Khối 1 - 9"
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>Đổi Bài Học</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundService.playClick();
+                      setShowImportModal(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    title="Tải lên tệp CSV/Excel để tạo bài học mới ngay"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Tải Lên Tệp</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                <span>Số câu hỏi trận đấu: <strong className="text-amber-400 font-bold">{questions.length} câu</strong></span>
+                <span>Thời gian mỗi câu: <strong className="text-cyan-400 font-bold">20 giây</strong></span>
+              </div>
             </div>
 
             <button
@@ -722,6 +785,48 @@ export const QuizBattleGame: React.FC<QuizBattleGameProps> = ({ onBackToEduplay 
         onClose={() => setShowTeamImportModal(false)}
         onApplyTeams={handleApplyImportedTeams}
       />
+
+      {/* QUESTION BANK SELECTOR MODAL */}
+      {showBankModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl overflow-y-auto p-4 sm:p-6">
+            <QuestionBankSelector
+              selectedLessonId={selectedLesson.id}
+              isModal={true}
+              onClose={() => setShowBankModal(false)}
+              onSelectLesson={(lesson) => {
+                setSelectedLesson(lesson);
+                setQuestions(lesson.questions);
+                QuestionBankRepository.setSelectedLessonId(lesson.id);
+                EduplayStorage.saveQuestions(lesson.questions);
+                setShowBankModal(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* QUESTION IMPORT MODAL */}
+      {showImportModal && (
+        <QuestionImportModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          currentQuestions={questions}
+          initialGrade={selectedLesson.grade}
+          initialSubject={selectedLesson.subject}
+          saveAsLesson={true}
+          onImportLessonSuccess={(newLesson, newQuestions) => {
+            setSelectedLesson(newLesson);
+            setQuestions(newQuestions);
+            QuestionBankRepository.setSelectedLessonId(newLesson.id);
+            EduplayStorage.saveQuestions(newQuestions);
+            setShowImportModal(false);
+          }}
+          onImportSuccess={(newQuestions) => {
+            setQuestions(newQuestions);
+          }}
+        />
+      )}
     </div>
   );
 };

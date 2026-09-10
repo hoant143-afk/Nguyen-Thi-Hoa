@@ -24,6 +24,8 @@ import {
   Edit3,
   HelpCircle,
   Trophy,
+  BookOpen,
+  Upload,
 } from 'lucide-react';
 import { Question, QuestionBankLesson } from '../../types';
 import { DEFAULT_QUESTIONS } from '../../data/defaultQuestions';
@@ -35,6 +37,8 @@ import { apiClient } from '../../services/apiClient';
 import { SmileDetector, SmileGestureMetrics, TeamMarkerResult } from './smileDetector';
 import { SmileCalibrationModal, SmileCalibrationSettings } from './SmileCalibrationModal';
 import { SmileRaceRepository } from '../../repositories/smileRaceRepository';
+import { QuestionBankSelector } from '../../components/common/QuestionBankSelector';
+import { QuestionImportModal } from '../../components/common/QuestionImportModal';
 
 export type SmileRaceState =
   | 'SETUP'
@@ -143,6 +147,8 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
 
   // Certificate Modal State
   const [showCertificate, setShowCertificate] = useState<boolean>(false);
+  const [showBankModal, setShowBankModal] = useState<boolean>(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
   // Active teams subset
   const activeTeams = teams.slice(0, teamCount);
@@ -840,19 +846,64 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
               </div>
 
               {/* Question Bank Selection */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Bộ câu hỏi trắc nghiệm:
-                </label>
+              <div className="space-y-3 bg-purple-50/60 border border-purple-200/80 rounded-2xl p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-purple-200 flex items-center justify-center text-purple-700">
+                      <BookOpen className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-purple-900 uppercase tracking-wider">
+                        Bộ câu hỏi thi đấu nụ cười:
+                      </div>
+                      <div className="text-sm font-black text-slate-800">
+                        {lessons.find((l) => l.id === selectedLessonId)?.lessonTitle || 'Bộ câu hỏi mặc định'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundService.playClick();
+                        setShowBankModal(true);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Chọn Từ Ngân Hàng</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundService.playClick();
+                        setShowImportModal(true);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Upload className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>Tải Lên Tệp</span>
+                    </button>
+                  </div>
+                </div>
+
                 <select
                   value={selectedLessonId}
-                  onChange={(e) => setSelectedLessonId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-purple-400"
+                  onChange={(e) => {
+                    setSelectedLessonId(e.target.value);
+                    const l = lessons.find((x) => x.id === e.target.value);
+                    if (l) {
+                      setQuestions(l.questions);
+                    }
+                  }}
+                  className="w-full px-3.5 py-2 rounded-xl border border-purple-200 text-xs font-medium text-slate-700 bg-white focus:ring-2 focus:ring-purple-400"
                 >
-                  <option value="">-- Dùng bộ câu hỏi mặc định (10 câu Tin học & Kỹ năng) --</option>
+                  <option value="">-- Chọn nhanh danh sách bài học đã lưu --</option>
                   {lessons.map((ls) => (
                     <option key={ls.id} value={ls.id}>
-                      {ls.lessonTitle} ({ls.questions.length} câu - {ls.subject})
+                      [Khối {ls.grade} - {ls.subject}] {ls.lessonTitle} ({ls.questions.length} câu)
                     </option>
                   ))}
                 </select>
@@ -1396,6 +1447,45 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
         onSaveSettings={handleSaveSettings}
         teams={activeTeams}
       />
+
+      {/* QUESTION BANK SELECTOR MODAL */}
+      {showBankModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl overflow-y-auto p-4 sm:p-6 text-slate-100">
+            <QuestionBankSelector
+              selectedLessonId={selectedLessonId}
+              isModal={true}
+              onClose={() => setShowBankModal(false)}
+              onSelectLesson={(lesson) => {
+                setSelectedLessonId(lesson.id);
+                setQuestions(lesson.questions);
+                setLessons(QuestionBankRepository.getAllLessons());
+                setShowBankModal(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* QUESTION IMPORT MODAL */}
+      {showImportModal && (
+        <QuestionImportModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          currentQuestions={questions}
+          saveAsLesson={true}
+          onImportLessonSuccess={(newLesson, newQuestions) => {
+            const all = QuestionBankRepository.getAllLessons();
+            setLessons(all);
+            setSelectedLessonId(newLesson.id);
+            setQuestions(newQuestions);
+            setShowImportModal(false);
+          }}
+          onImportSuccess={(newQuestions) => {
+            setQuestions(newQuestions);
+          }}
+        />
+      )}
     </div>
   );
 };

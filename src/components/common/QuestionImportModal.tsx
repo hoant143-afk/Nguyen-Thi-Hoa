@@ -39,23 +39,43 @@ import { soundService } from '../../services/soundService';
 import { EduplayStorage } from '../../services/eduplayStorage';
 import { QuestionsRepository } from '../../repositories/questionsRepository';
 import { apiClient } from '../../services/apiClient';
+import { QuestionBankRepository } from '../../repositories/questionBankRepository';
+import { GradeLevel, QuestionBankLesson } from '../../types';
 
 interface QuestionImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImportSuccess: (newQuestions: Question[]) => void;
+  onImportLessonSuccess?: (newLesson: QuestionBankLesson, newQuestions: Question[]) => void;
   currentQuestions: Question[];
+  initialLessonTitle?: string;
+  initialGrade?: GradeLevel;
+  initialSubject?: string;
+  targetLessonId?: string;
+  saveAsLesson?: boolean;
 }
 
 export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
   isOpen,
   onClose,
   onImportSuccess,
+  onImportLessonSuccess,
   currentQuestions,
+  initialLessonTitle = '',
+  initialGrade = 5,
+  initialSubject = 'Tin học',
+  targetLessonId,
+  saveAsLesson = true,
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [fileInfo, setFileInfo] = useState<{ name: string; size: string; type: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Lesson metadata for Question Bank storage
+  const [saveToBank, setSaveToBank] = useState<boolean>(saveAsLesson);
+  const [lessonTitle, setLessonTitle] = useState<string>(initialLessonTitle);
+  const [lessonGrade, setLessonGrade] = useState<GradeLevel>(initialGrade);
+  const [lessonSubject, setLessonSubject] = useState<string>(initialSubject);
 
   // Workbook / sheets state
   const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
@@ -125,6 +145,29 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
         size: formatFileSize(selectedFile.size),
         type: isCsv ? 'CSV' : isXlsx ? 'Excel (.xlsx)' : 'Excel (.xls)',
       });
+
+      // Auto-detect lesson title, grade, subject from file name if not already set
+      const cleanBaseName = selectedFile.name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[-_]+/g, ' ')
+        .trim();
+      if (!lessonTitle) {
+        setLessonTitle(cleanBaseName);
+      }
+      const gradeMatch = cleanBaseName.match(/(?:khoi|khối|lop|lớp|k)\s*([1-9])/i);
+      if (gradeMatch) {
+        const detectedGrade = parseInt(gradeMatch[1], 10) as GradeLevel;
+        if (detectedGrade >= 1 && detectedGrade <= 9) {
+          setLessonGrade(detectedGrade);
+        }
+      }
+      const lowerBase = cleanBaseName.toLowerCase();
+      if (lowerBase.includes('toán') || lowerBase.includes('toan')) setLessonSubject('Toán');
+      else if (lowerBase.includes('tiếng việt') || lowerBase.includes('tieng viet')) setLessonSubject('Tiếng Việt');
+      else if (lowerBase.includes('tiếng anh') || lowerBase.includes('tieng anh') || lowerBase.includes('english')) setLessonSubject('Tiếng Anh');
+      else if (lowerBase.includes('khoa học') || lowerBase.includes('khoa hoc')) setLessonSubject('Khoa học');
+      else if (lowerBase.includes('lịch sử') || lowerBase.includes('địa lý') || lowerBase.includes('dia ly')) setLessonSubject('Lịch sử & Địa lý');
+      else if (lowerBase.includes('tin học') || lowerBase.includes('tin hoc')) setLessonSubject('Tin học');
 
       if (isCsv) {
         // Parse CSV UTF-8
@@ -290,6 +333,24 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
         finalQuestionsList = [...currentQuestions, ...newItems];
       }
 
+      // Save as lesson in QuestionBankRepository if enabled
+      let createdLesson: QuestionBankLesson | null = null;
+      if (saveToBank) {
+        const id = targetLessonId || `lesson_${Date.now()}`;
+        const existingLesson = targetLessonId ? QuestionBankRepository.getLessonById(targetLessonId) : null;
+        createdLesson = {
+          id,
+          grade: lessonGrade,
+          subject: lessonSubject.trim() || 'Tin học',
+          lessonNumber: existingLesson?.lessonNumber || Date.now(),
+          lessonTitle: lessonTitle.trim() || fileInfo?.name.replace(/\.[^/.]+$/, '') || 'Bài học mới',
+          description: `Bộ câu hỏi nhập từ tệp ${fileInfo?.name || 'Excel/CSV'} (${finalQuestionsList.length} câu hỏi)`,
+          questions: finalQuestionsList,
+        };
+        QuestionBankRepository.saveLesson(createdLesson);
+        QuestionBankRepository.setSelectedLessonId(createdLesson.id);
+      }
+
       // Save locally to EduplayStorage
       EduplayStorage.saveQuestions(finalQuestionsList);
 
@@ -317,6 +378,9 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
         errorRows: stats.error,
       });
 
+      if (createdLesson && onImportLessonSuccess) {
+        onImportLessonSuccess(createdLesson, finalQuestionsList);
+      }
       onImportSuccess(finalQuestionsList);
       onClose();
     } catch (err: any) {
@@ -573,6 +637,76 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                   <span>Chọn tệp khác</span>
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* LƯU THÀNH BÀI HỌC VÀO NGÂN HÀNG ĐỂ CHỌN TRONG CÁC GAME */}
+          {file && (
+            <div className="bg-gradient-to-r from-slate-900 via-cyan-950/40 to-slate-900 border border-cyan-500/30 rounded-2xl p-4 space-y-3 shadow-lg">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-black uppercase text-cyan-300">
+                  <input
+                    type="checkbox"
+                    checked={saveToBank}
+                    onChange={(e) => setSaveToBank(e.target.checked)}
+                    className="w-4 h-4 rounded text-cyan-500 focus:ring-cyan-400 cursor-pointer"
+                  />
+                  <span>LƯU THÀNH BÀI HỌC VÀO NGÂN HÀNG ĐỂ CHỌN TRONG CÁC TRÒ CHƠI</span>
+                </label>
+                {saveToBank && (
+                  <span className="text-[11px] text-emerald-300 font-bold bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/40 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Tự động lưu & nạp sẵn cho các Game
+                  </span>
+                )}
+              </div>
+
+              {saveToBank && (
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
+                  <div className="sm:col-span-3">
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      1. Khối Lớp (1 - 9):
+                    </label>
+                    <select
+                      value={lessonGrade}
+                      onChange={(e) => setLessonGrade(Number(e.target.value) as GradeLevel)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-black focus:border-cyan-400 focus:outline-none"
+                    >
+                      {([1, 2, 3, 4, 5, 6, 7, 8, 9] as GradeLevel[]).map((g) => (
+                        <option key={g} value={g} className="bg-slate-900 text-white">
+                          Khối {g}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-4">
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      2. Môn Học:
+                    </label>
+                    <input
+                      type="text"
+                      value={lessonSubject}
+                      onChange={(e) => setLessonSubject(e.target.value)}
+                      placeholder="VD: Tin học, Toán, Tiếng Việt..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-bold focus:border-cyan-400 focus:outline-none placeholder:text-slate-600"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-5">
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      3. Tên Bài Học / Chủ Đề:
+                    </label>
+                    <input
+                      type="text"
+                      value={lessonTitle}
+                      onChange={(e) => setLessonTitle(e.target.value)}
+                      placeholder="VD: Bài 3: Định dạng văn bản..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-cyan-300 font-black focus:border-cyan-400 focus:outline-none placeholder:text-slate-600"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

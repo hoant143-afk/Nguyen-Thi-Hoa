@@ -99,10 +99,34 @@ const FAST_PRESET_PACKS = [
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEduplay }) => {
   const [activeTab, setActiveTab] = useState<'TEAMS' | 'QUESTIONS' | 'HISTORY' | 'DATABASE'>('TEAMS');
-  const [defaultTeamCount, setDefaultTeamCount] = useState<TeamCount>(4);
+  const [defaultTeamCount, setDefaultTeamCount] = useState<TeamCount>(() => {
+    const saved = EduplayStorage.getGameData<number>('eduplay_default_team_count', 4);
+    return (saved === 2 || saved === 3 || saved === 4) ? (saved as TeamCount) : 4;
+  });
   const [configuredTeams, setConfiguredTeams] = useState<TeamPreset[]>(() => {
     return EduplayStorage.getGameData('eduplay_team_presets', DEFAULT_TEAM_PRESETS);
   });
+  const [teamImportFile, setTeamImportFile] = useState<File | null>(null);
+  const teamFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportTeamsClick = () => {
+    soundService.playClick();
+    if (teamFileInputRef.current) {
+      teamFileInputRef.current.value = '';
+      teamFileInputRef.current.click();
+    }
+  };
+
+  const handleTeamFileSelected = (file: File) => {
+    if (!file) return;
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    if (!['.csv', '.xlsx', '.xls'].includes(ext)) {
+      alert('❌ Định dạng file không được hỗ trợ. Vui lòng chọn tệp .csv, .xlsx hoặc .xls');
+      return;
+    }
+    setTeamImportFile(file);
+    setShowTeamImportModal(true);
+  };
 
   const [questions, setQuestions] = useState<Question[]>(() => EduplayStorage.getQuestions());
   const [history, setHistory] = useState(() => EduplayStorage.getHistory());
@@ -297,20 +321,38 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEdup
     }
   };
 
-  const handleApplyImportedTeams = (importedTeams: { name: string; color: string; badge?: string }[]) => {
+  const handleApplyImportedTeams = (
+    importedTeams: { name: string; color: string; markerColor?: string; badge?: string }[]
+  ) => {
     soundService.playClick();
-    const updated = configuredTeams.map((t, idx) => {
-      const imp = importedTeams[idx];
-      if (imp) {
-        return {
-          ...t,
-          defaultName: imp.name,
-          color: imp.color,
-          badge: imp.badge || t.badge,
-        };
+    const count = Math.min(4, Math.max(2, importedTeams.length)) as TeamCount;
+    setDefaultTeamCount(count);
+    EduplayStorage.setGameData('eduplay_default_team_count', count);
+
+    const updated: TeamPreset[] = [...configuredTeams];
+    importedTeams.forEach((imp, idx) => {
+      if (idx < 4) {
+        if (updated[idx]) {
+          updated[idx] = {
+            ...updated[idx],
+            defaultName: imp.name,
+            color: imp.color,
+            accentColor: imp.markerColor || imp.color,
+            badge: imp.badge || updated[idx].badge,
+          };
+        } else {
+          const code = (`TEAM${idx + 1}`) as 'TEAM1' | 'TEAM2' | 'TEAM3' | 'TEAM4';
+          updated.push({
+            code,
+            defaultName: imp.name,
+            color: imp.color,
+            accentColor: imp.markerColor || imp.color,
+            badge: imp.badge || '⚡',
+          });
+        }
       }
-      return t;
     });
+
     setConfiguredTeams(updated);
     EduplayStorage.setGameData('eduplay_team_presets', updated);
     setSaveSuccessMsg(`Đã nhập thành công ${importedTeams.length} đội từ tệp!`);
@@ -628,28 +670,64 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEdup
             {/* Active Teams Configuration Editor (4 Default Teams) */}
             <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
-                <div>
-                  <h3 className="text-sm font-black text-white uppercase flex items-center gap-2">
-                    <span>Cấu hình 4 Đội chơi mặc định</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Các giá trị này sẽ tự động nạp sẵn khi bắt đầu bất kỳ trò chơi nào (Cam Race, Quiz Battle, Fastest Hand...)
-                  </p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div>
+                    <h3 className="text-sm font-black text-white uppercase flex items-center gap-2">
+                      <span>Cấu hình {defaultTeamCount} Đội chơi mặc định</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Các giá trị này sẽ tự động nạp sẵn khi bắt đầu bất kỳ trò chơi nào (Cam Race, Quiz Battle, Fastest Hand...)
+                    </p>
+                  </div>
+
+                  {/* Team Count Selector (2, 3, 4 Đội) */}
+                  <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                    {([2, 3, 4] as TeamCount[]).map((cnt) => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => {
+                          soundService.playClick();
+                          setDefaultTeamCount(cnt);
+                          EduplayStorage.setGameData('eduplay_default_team_count', cnt);
+                        }}
+                        className={`px-3 py-1 text-xs font-black rounded-lg transition-all cursor-pointer ${
+                          defaultTeamCount === cnt
+                            ? 'bg-cyan-500 text-slate-950 shadow-md'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {cnt} ĐỘI
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundService.playClick();
-                      setShowTeamImportModal(true);
+                  {/* Hidden Input for Team Import */}
+                  <input
+                    ref={teamFileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleTeamFileSelected(e.target.files[0]);
+                      }
+                      e.target.value = '';
                     }}
-                    className="px-4 py-2 bg-amber-950/70 hover:bg-amber-900 border border-amber-500/40 text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                  />
+                  <button
+                    id="btn-import-teams-excel-csv"
+                    type="button"
+                    onClick={handleImportTeamsClick}
+                    className="px-4 py-2 bg-amber-950/70 hover:bg-amber-900 border border-amber-500/40 text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                   >
                     <Upload className="w-4 h-4" />
                     <span>📥 Nhập Đội Từ CSV / Excel</span>
                   </button>
                   <button
+                    id="btn-save-teams-config"
                     onClick={handleSaveTeamsConfig}
                     className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow cursor-pointer transition-all flex items-center gap-1.5"
                   >
@@ -659,8 +737,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEdup
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {configuredTeams.map((team, idx) => (
+              <div
+                className={`grid grid-cols-1 sm:grid-cols-2 ${
+                  defaultTeamCount === 2
+                    ? 'lg:grid-cols-2'
+                    : defaultTeamCount === 3
+                    ? 'lg:grid-cols-3'
+                    : 'lg:grid-cols-4'
+                } gap-4`}
+              >
+                {configuredTeams.slice(0, defaultTeamCount).map((team, idx) => (
                   <div
                     key={team.code || idx}
                     style={{ borderColor: `${team.color}55` }}
@@ -739,7 +825,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEdup
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundService.playClick();
+                        setCurrentOpenLesson(null);
+                        setShowQuestionImportModal(true);
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/20 transition-all uppercase tracking-wide shrink-0"
+                      title="Tải lên tệp Excel hoặc CSV để tạo bài học và lưu vào ngân hàng cho các game"
+                    >
+                      <Upload className="w-4 h-4 stroke-[2.5]" />
+                      <span>📥 Tải Lên Bộ Câu Hỏi (CSV / Excel)</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => openCreateLessonModal(activeGrade)}
@@ -1365,23 +1465,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEdup
         isOpen={showQuestionImportModal}
         onClose={() => setShowQuestionImportModal(false)}
         currentQuestions={currentOpenLesson ? currentOpenLesson.questions : questions}
-        onImportSuccess={(newQuestions) => {
+        targetLessonId={currentOpenLesson?.id}
+        initialLessonTitle={currentOpenLesson?.lessonTitle || ''}
+        initialGrade={currentOpenLesson?.grade || activeGrade}
+        initialSubject={currentOpenLesson?.subject || (activeSubject !== 'Tất cả môn' ? activeSubject : 'Tin học')}
+        saveAsLesson={true}
+        onImportLessonSuccess={(newLesson, newQuestions) => {
+          refreshLessons();
+          setSelectedGameLessonId(newLesson.id);
+          QuestionBankRepository.setSelectedLessonId(newLesson.id);
+          setQuestions(newQuestions);
+          EduplayStorage.saveQuestions(newQuestions);
           if (currentOpenLesson) {
-            const updated = { ...currentOpenLesson, questions: newQuestions };
-            QuestionBankRepository.saveLesson(updated);
-            setCurrentOpenLesson(updated);
-            refreshLessons();
-            if (currentOpenLesson.id === selectedGameLessonId) {
-              setQuestions(newQuestions);
-              EduplayStorage.saveQuestions(newQuestions);
-            }
-            setSaveSuccessMsg(`Đã nhập thành công ${newQuestions.length} câu vào bài [${currentOpenLesson.lessonTitle}]!`);
-          } else {
-            setQuestions(newQuestions);
-            EduplayStorage.saveQuestions(newQuestions);
-            setSaveSuccessMsg(`Đã nhập thành công ${newQuestions.length} câu vào Ngân hàng câu hỏi!`);
+            setCurrentOpenLesson(newLesson);
           }
-          setTimeout(() => setSaveSuccessMsg(null), 4000);
+          setSaveSuccessMsg(`Đã lưu thành công bài học [${newLesson.lessonTitle}] (${newQuestions.length} câu) vào Ngân hàng! Bạn có thể chọn game để thi đấu ngay.`);
+          setTimeout(() => setSaveSuccessMsg(null), 5000);
+        }}
+        onImportSuccess={(newQuestions) => {
+          refreshLessons();
         }}
       />
 
@@ -1759,7 +1861,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEdup
       {/* TEAM IMPORT MODAL */}
       <TeamImportModal
         isOpen={showTeamImportModal}
-        onClose={() => setShowTeamImportModal(false)}
+        initialFile={teamImportFile}
+        onClose={() => {
+          setShowTeamImportModal(false);
+          setTeamImportFile(null);
+        }}
         onApplyTeams={handleApplyImportedTeams}
       />
     </div>

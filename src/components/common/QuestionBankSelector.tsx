@@ -9,10 +9,12 @@ import {
   X,
   ChevronRight,
   Search,
+  Upload,
 } from 'lucide-react';
 import { GradeLevel, QuestionBankLesson } from '../../types';
 import { QuestionBankRepository } from '../../repositories/questionBankRepository';
 import { soundService } from '../../services/soundService';
+import { QuestionImportModal } from './QuestionImportModal';
 
 interface QuestionBankSelectorProps {
   selectedLessonId: string;
@@ -38,6 +40,7 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
   const [activeSubject, setActiveSubject] = useState<string>('Tất cả môn');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [previewLesson, setPreviewLesson] = useState<QuestionBankLesson | null>(null);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
   // Available subjects for active grade
   const subjects = useMemo(() => {
@@ -96,17 +99,32 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
             </div>
           </div>
 
-          {onClose && (
+          <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={() => {
                 soundService.playClick();
-                onClose();
+                setShowImportModal(true);
               }}
-              className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center cursor-pointer transition-colors"
+              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
+              title="Tải lên tệp CSV/Excel để tạo bài học mới ngay"
             >
-              <X className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>+ Tải lên bài mới</span>
             </button>
-          )}
+
+            {onClose && (
+              <button
+                onClick={() => {
+                  soundService.playClick();
+                  onClose();
+                }}
+                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -372,6 +390,24 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* UPLOAD MODAL */}
+      {showImportModal && (
+        <QuestionImportModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          currentQuestions={[]}
+          initialGrade={activeGrade}
+          initialSubject={activeSubject !== 'Tất cả môn' ? activeSubject : 'Tin học'}
+          saveAsLesson={true}
+          onImportLessonSuccess={(newLesson) => {
+            setShowImportModal(false);
+            handleChoose(newLesson);
+          }}
+          onImportSuccess={() => {
+            // refresh
+          }}
+        />
       )}
     </div>
   );

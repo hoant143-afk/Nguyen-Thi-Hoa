@@ -16,7 +16,9 @@ export function isValidHexColor(color: string): boolean {
  * Parses raw team rows from CSV or Excel into TeamImportItem
  */
 export function parseTeamRows(rows: Record<string, any>[]): TeamImportItem[] {
-  if (!rows || rows.length === 0) return [];
+  if (!rows || rows.length === 0) {
+    throw new Error('❌ File không có dữ liệu đội.');
+  }
 
   // Detect column mapping for teams
   const sample = rows[0];
@@ -24,28 +26,32 @@ export function parseTeamRows(rows: Record<string, any>[]): TeamImportItem[] {
 
   let nameCol = '';
   let colorCol = '';
+  let markerColorCol = '';
   let badgeCol = '';
 
   for (const h of headers) {
     const norm = normalizeHeaderKey(h);
-    if (!nameCol && (norm.includes('name') || norm.includes('tendoi') || norm.includes('doi') || norm.includes('team'))) {
+    if (!nameCol && (norm.includes('teamname') || norm.includes('tendoi') || norm.includes('namedoi') || norm === 'team' || norm === 'name' || norm.includes('ten') || norm.includes('doi'))) {
       nameCol = h;
-    } else if (!colorCol && (norm.includes('color') || norm.includes('mau') || norm.includes('mamau'))) {
+    } else if (!colorCol && (norm.includes('teamcolor') || norm.includes('maudoi') || norm.includes('color') || norm.includes('mamau') || norm.includes('mau'))) {
       colorCol = h;
-    } else if (!badgeCol && (norm.includes('badge') || norm.includes('icon') || norm.includes('bieutuong'))) {
+    } else if (!markerColorCol && (norm.includes('markercolor') || norm.includes('mauthe') || norm.includes('cardcolor') || norm.includes('the') || norm.includes('marker'))) {
+      markerColorCol = h;
+    } else if (!badgeCol && (norm.includes('badge') || norm.includes('icon') || norm.includes('bieutuong') || norm.includes('hieu'))) {
       badgeCol = h;
     }
   }
 
-  // Fallback if headers not found by keywords
-  if (!nameCol && headers.length > 0) nameCol = headers[0];
-  if (!colorCol && headers.length > 1) colorCol = headers[1];
+  if (!nameCol) {
+    throw new Error('❌ File không có cột teamName.');
+  }
 
   const teams: TeamImportItem[] = [];
 
   rows.forEach((r, idx) => {
     const rawName = nameCol ? String(r[nameCol] || '').trim() : '';
     const rawColor = colorCol ? String(r[colorCol] || '').trim() : '';
+    const rawMarkerColor = markerColorCol ? String(r[markerColorCol] || '').trim() : '';
     const rawBadge = badgeCol ? String(r[badgeCol] || '').trim() : '';
 
     if (!rawName) return; // skip empty rows
@@ -61,18 +67,28 @@ export function parseTeamRows(rows: Record<string, any>[]): TeamImportItem[] {
       }
     }
 
+    let validMarkerColor = rawMarkerColor;
+    if (!validMarkerColor || !isValidHexColor(validMarkerColor)) {
+      validMarkerColor = validColor;
+    }
+
     const badge = rawBadge || DEFAULT_BADGES[idx % DEFAULT_BADGES.length];
 
     teams.push({
       id: `imported_team_${idx + 1}_${Date.now()}`,
       teamName: rawName.toUpperCase(),
       teamColor: validColor,
+      markerColor: validMarkerColor,
       badge,
       selected: idx < 4, // by default select up to 4 teams
       isValid,
       error,
     });
   });
+
+  if (teams.length === 0) {
+    throw new Error('❌ File không có dữ liệu đội.');
+  }
 
   return teams;
 }
@@ -82,11 +98,11 @@ export function parseTeamRows(rows: Record<string, any>[]): TeamImportItem[] {
  */
 export function generateTeamCsvTemplate(): string {
   const content = [
-    'teamName,teamColor',
-    'Sao Xanh,#2563EB',
-    'Tia Chớp,#F97316',
-    'Siêu Việt,#22C55E',
-    'Chiến Binh,#9333EA',
+    'teamName,teamColor,markerColor',
+    'Đội Tia Chớp,#2563EB,#2563EB',
+    'Đội Mặt Trời,#F97316,#F97316',
+    'Đội Siêu Việt,#22C55E,#22C55E',
+    'Đội Chiến Binh,#9333EA,#9333EA',
   ].join('\r\n');
 
   return '\uFEFF' + content;
@@ -97,10 +113,10 @@ export function generateTeamCsvTemplate(): string {
  */
 export function generateTeamExcelTemplate(): Uint8Array {
   const data = [
-    { teamName: 'Sao Xanh', teamColor: '#2563EB' },
-    { teamName: 'Tia Chớp', teamColor: '#F97316' },
-    { teamName: 'Siêu Việt', teamColor: '#22C55E' },
-    { teamName: 'Chiến Binh', teamColor: '#9333EA' },
+    { teamName: 'Đội Tia Chớp', teamColor: '#2563EB', markerColor: '#2563EB' },
+    { teamName: 'Đội Mặt Trời', teamColor: '#F97316', markerColor: '#F97316' },
+    { teamName: 'Đội Siêu Việt', teamColor: '#22C55E', markerColor: '#22C55E' },
+    { teamName: 'Đội Chiến Binh', teamColor: '#9333EA', markerColor: '#9333EA' },
   ];
 
   const worksheet = XLSX.utils.json_to_sheet(data);

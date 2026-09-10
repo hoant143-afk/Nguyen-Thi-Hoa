@@ -68,6 +68,7 @@ export interface TeamImportItem {
   id: string;
   teamName: string;
   teamColor: string;
+  markerColor?: string;
   badge?: string;
   selected: boolean;
   isValid: boolean;
