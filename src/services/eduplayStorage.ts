@@ -2,23 +2,57 @@ import { Classroom, DEFAULT_CLASSES, MatchHistoryEntry } from '../data/classData
 import { Question } from '../types';
 import { DEFAULT_QUESTIONS } from '../data/defaultQuestions';
 
-export const STORAGE_NAMESPACES = {
-  CLASSES: 'eduplay_classes_v1',
-  QUESTIONS: 'eduplay_questions_bank_v1',
-  MATCH_HISTORY: 'eduplay_match_history_v1',
-  SESSION_HISTORY: 'eduplay_match_history_v1',
-  QUIZ_BATTLE: 'eduplay_quizbattle_state_v1',
-  LUCKY_WHEEL: 'eduplay_luckywheel_config_v1',
-  FASTEST_HAND: 'eduplay_fastesthand_state_v1',
-  RANDOM_PICKER: 'eduplay_randompicker_state_v1',
-  TEAM_CHALLENGE: 'eduplay_teamchallenge_state_v1',
+/**
+ * 🎓 EDUPLAY - MULTI-USER LOCAL STORAGE MANAGER
+ * Implements strict UID namespacing for teacher data:
+ * eduplay_${uid}_* for private teacher resources
+ * eduplay_system_* for public/default system resources
+ */
+
+export const SYSTEM_STORAGE_NAMESPACES = {
+  SYSTEM_QUESTIONS: 'eduplay_system_questions',
+  GAME_CATALOG: 'eduplay_game_catalog',
+  SYSTEM_SETTINGS: 'eduplay_system_settings_v1',
 };
 
+export const STORAGE_NAMESPACES = {
+  CLASSES: 'classes',
+  QUESTIONS: 'questions',
+  SESSION_HISTORY: 'history',
+  SYSTEM_SETTINGS: 'system_settings_v1',
+  SETTINGS: 'system_settings_v1',
+  LUCKY_WHEEL: 'lucky_wheel_state',
+  TEAM_CHALLENGE: 'team_challenge_state',
+  QUIZ_BATTLE: 'quiz_battle_state',
+  CAM_RACE: 'cam_race_state',
+  SMILE_RACE: 'smile_race_state',
+  FASTEST_HAND: 'fastest_hand_state',
+  RANDOM_TEAM: 'random_team_state',
+};
+
+let currentTeacherUid: string = '';
+
 export class EduplayStorage {
-  // Classes & Students
+  public static setTeacherUid(uid: string | null | undefined): void {
+    currentTeacherUid = uid ? uid.trim() : '';
+  }
+
+  public static getTeacherUid(): string {
+    return currentTeacherUid;
+  }
+
+  public static getUserKey(resource: string): string {
+    if (currentTeacherUid) {
+      return `eduplay_${currentTeacherUid}_${resource}`;
+    }
+    return `eduplay_guest_${resource}`;
+  }
+
+  // Classes & Students (Teacher Scoped)
   public static getClasses(): Classroom[] {
     try {
-      const data = localStorage.getItem(STORAGE_NAMESPACES.CLASSES);
+      const key = this.getUserKey('classes');
+      const data = localStorage.getItem(key);
       if (!data) {
         this.saveClasses(DEFAULT_CLASSES);
         return DEFAULT_CLASSES;
@@ -31,16 +65,18 @@ export class EduplayStorage {
 
   public static saveClasses(classes: Classroom[]): void {
     try {
-      localStorage.setItem(STORAGE_NAMESPACES.CLASSES, JSON.stringify(classes));
+      const key = this.getUserKey('classes');
+      localStorage.setItem(key, JSON.stringify(classes));
     } catch (e) {
       console.error('Error saving classes to storage', e);
     }
   }
 
-  // Question Bank
+  // Question Bank (Teacher Scoped)
   public static getQuestions(): Question[] {
     try {
-      const data = localStorage.getItem(STORAGE_NAMESPACES.QUESTIONS);
+      const key = this.getUserKey('questions');
+      const data = localStorage.getItem(key);
       if (!data) {
         this.saveQuestions(DEFAULT_QUESTIONS);
         return DEFAULT_QUESTIONS;
@@ -54,16 +90,18 @@ export class EduplayStorage {
 
   public static saveQuestions(questions: Question[]): void {
     try {
-      localStorage.setItem(STORAGE_NAMESPACES.QUESTIONS, JSON.stringify(questions));
+      const key = this.getUserKey('questions');
+      localStorage.setItem(key, JSON.stringify(questions));
     } catch (e) {
       console.error('Error saving questions to storage', e);
     }
   }
 
-  // Match History
+  // Match History (Teacher Scoped)
   public static getHistory(): MatchHistoryEntry[] {
     try {
-      const data = localStorage.getItem(STORAGE_NAMESPACES.MATCH_HISTORY);
+      const key = this.getUserKey('match_history');
+      const data = localStorage.getItem(key);
       if (!data) return [];
       return JSON.parse(data);
     } catch {
@@ -79,16 +117,18 @@ export class EduplayStorage {
         id: `match_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       };
       const updated = [newEntry, ...current].slice(0, 50); // keep last 50
-      localStorage.setItem(STORAGE_NAMESPACES.MATCH_HISTORY, JSON.stringify(updated));
+      const key = this.getUserKey('match_history');
+      localStorage.setItem(key, JSON.stringify(updated));
     } catch (e) {
       console.error('Error recording match history', e);
     }
   }
 
-  // Game-specific generic helpers
+  // Game-specific generic helpers (scoped to teacher)
   public static getGameData<T>(namespace: string, fallback: T): T {
     try {
-      const data = localStorage.getItem(namespace);
+      const key = this.getUserKey(namespace);
+      const data = localStorage.getItem(key);
       if (!data) return fallback;
       return JSON.parse(data) as T;
     } catch {
@@ -98,7 +138,8 @@ export class EduplayStorage {
 
   public static setGameData<T>(namespace: string, value: T): void {
     try {
-      localStorage.setItem(namespace, JSON.stringify(value));
+      const key = this.getUserKey(namespace);
+      localStorage.setItem(key, JSON.stringify(value));
     } catch (e) {
       console.error(`Error saving ${namespace} data`, e);
     }
@@ -108,17 +149,41 @@ export class EduplayStorage {
     this.setGameData(namespace, value);
   }
 
-  // System Settings Helper
+  // System Settings Helper (Public/System shared)
   public static getSettings(): Record<string, any> {
-    return this.getGameData('eduplay_system_settings_v1', {
-      schoolName: 'TRƯỜNG TIỂU HỌC CHU VĂN AN',
-      className: '5A1',
-      teacherName: 'Thầy Hoàng',
-      defaultTeamCount: 4,
-    });
+    try {
+      const data = localStorage.getItem(SYSTEM_STORAGE_NAMESPACES.SYSTEM_SETTINGS);
+      if (!data) {
+        return {
+          schoolName: 'TRƯỜNG TIỂU HỌC CHU VĂN AN',
+          className: '5A1',
+          teacherName: 'Thầy Hoàng',
+          defaultTeamCount: 4,
+        };
+      }
+      return JSON.parse(data);
+    } catch {
+      return {
+        schoolName: 'TRƯỜNG TIỂU HỌC CHU VĂN AN',
+        className: '5A1',
+        teacherName: 'Thầy Hoàng',
+        defaultTeamCount: 4,
+      };
+    }
   }
 
   public static saveSettings(settings: Record<string, any>): void {
-    this.setGameData('eduplay_system_settings_v1', settings);
+    try {
+      localStorage.setItem(SYSTEM_STORAGE_NAMESPACES.SYSTEM_SETTINGS, JSON.stringify(settings));
+    } catch (e) {
+      console.error('Error saving system settings', e);
+    }
+  }
+
+  /**
+   * Clear transient memory cache on logout / account switch
+   */
+  public static clearUserTransientState(): void {
+    currentTeacherUid = '';
   }
 }

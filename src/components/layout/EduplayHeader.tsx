@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { soundService } from '../../services/soundService';
 import { CloudSyncStatus } from '../common/CloudSyncStatus';
+import { EduplayUserMenu } from './EduplayUserMenu';
+import { useAuth } from '../../auth/AuthProvider';
 
 interface EduplayHeaderProps {
   currentRoute: string;
@@ -25,8 +27,10 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
   onNavigate,
   onOpenTeacherDashboard,
 }) => {
+  const { isAuthenticated } = useAuth();
   const [isMuted, setIsMuted] = useState<boolean>(soundService.getMuted());
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -156,6 +160,24 @@ export const EduplayHeader: React.FC<EduplayHeaderProps> = ({
             <GraduationCap className="w-4 h-4" />
             <span>Bảng điều khiển GV</span>
           </button>
+
+          {/* User Menu / Profile Dropdown */}
+          {isAuthenticated ? (
+            <EduplayUserMenu
+              onNavigate={onNavigate}
+              onOpenSettings={onOpenTeacherDashboard}
+            />
+          ) : (
+            <button
+              onClick={() => {
+                soundService.playClick();
+                onNavigate('/login');
+              }}
+              className="flex items-center gap-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 px-3.5 py-2 rounded-xl text-xs font-black shadow-xs cursor-pointer transition-all"
+            >
+              <span>Đăng nhập</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

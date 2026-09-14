@@ -245,15 +245,16 @@ function auditOwnership() {
 function doGet(e) {
   try {
     const action = e && e.parameter && e.parameter.action ? String(e.parameter.action).trim() : 'settings.get';
+    const idToken = e && e.parameter && e.parameter.idToken ? String(e.parameter.idToken).trim() : '';
     const data = {};
     if (e && e.parameter) {
       Object.keys(e.parameter).forEach(k => {
-        if (k !== 'action') {
+        if (k !== 'action' && k !== 'idToken') {
           data[k] = e.parameter[k];
         }
       });
     }
-    const response = handleApiRequest(action, data);
+    const response = handleApiRequest(action, data, idToken);
     return createJsonResponse(response);
   } catch (err) {
     appendLog('ERROR', 'SYSTEM', 'doGet', err.toString(), '', e ? JSON.stringify(e.parameter) : '');
@@ -279,12 +280,13 @@ function doPost(e) {
 
     const action = requestPayload.action ? String(requestPayload.action).trim() : '';
     const data = requestPayload.data || {};
+    const idToken = requestPayload.idToken ? String(requestPayload.idToken).trim() : '';
 
     if (!action) {
       return createJsonResponse(errorResponse('MISSING_ACTION', 'Thiếu trường action trong yêu cầu POST'));
     }
 
-    const response = handleApiRequest(action, data);
+    const response = handleApiRequest(action, data, idToken);
     return createJsonResponse(response);
   } catch (err) {
     appendLog('ERROR', 'SYSTEM', 'doPost', err.toString(), '', e && e.postData ? e.postData.contents : '');
@@ -316,165 +318,691 @@ function errorResponse(code, message) {
 }
 
 // ==========================================
-// 4. ROUTER & API WHITELIST
+// 4. FIREBASE AUTHENTICATION & ID TOKEN VERIFICATION
+// ==========================================
+
+/**
+ * Get Firebase Web API Key from Script Properties (or SETTINGS sheet fallback)
+ * Configured in Apps Script: Project Settings -> Script Properties -> FIREBASE_WEB_API_KEY
+ */
+function getFirebaseApiKey() {
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const apiKey = scriptProperties.getProperty('FIREBASE_WEB_API_KEY');
+  if (apiKey && apiKey.trim()) {
+    return apiKey.trim();
+  }
+
+  // Fallback to SETTINGS sheet if teacher stored it there
+  try {
+    const settingsSheet = getSheet('SETTINGS');
+    if (settingsSheet && settingsSheet.getLastRow() > 1) {
+      const headers = getHeaders(settingsSheet);
+      const keyCol = headers.indexOf('key');
+      const valCol = headers.indexOf('value');
+      if (keyCol !== -1 && valCol !== -1) {
+        const rows = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, headers.length).getValues();
+        for (let i = 0; i < rows.length; i++) {
+          if (String(rows[i][keyCol]).trim() === 'FIREBASE_WEB_API_KEY') {
+            const val = String(rows[i][valCol]).trim();
+            if (val) return val;
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  throw new Error('FIREBASE_CONFIG_MISSING: Chưa cấu hình FIREBASE_WEB_API_KEY trong Apps Script Script Properties.');
+}
+
+/**
+ * Verify Firebase ID Token via Google Identity Toolkit REST API
+ * POST https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=FIREBASE_WEB_API_KEY
+ * Returns: { uid, email, displayName, photoURL, emailVerified }
+ */
+function verifyFirebaseIdToken(idToken) {
+  if (!idToken || typeof idToken !== 'string' || !idToken.trim()) {
+    throw new Error('AUTH_REQUIRED: Thiếu Firebase ID Token trong yêu cầu.');
+  }
+
+  const cleanToken = idToken.trim();
+  const apiKey = getFirebaseApiKey();
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`;
+
+  const payload = {
+    idToken: cleanToken
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  let response;
+  try {
+    response = UrlFetchApp.fetch(url, options);
+  } catch (networkErr) {
+    appendLog('ERROR', 'AUTH', 'verifyFirebaseIdToken', 'Lỗi kết nối Firebase Identity Toolkit: ' + networkErr.message);
+    throw new Error('AUTH_SERVER_ERROR: Không thể kết nối máy chủ xác thực Firebase. Vui lòng kiểm tra lại mạng.');
+  }
+
+  const statusCode = response.getResponseCode();
+  const responseText = response.getContentText();
+  let jsonResult = {};
+
+  try {
+    jsonResult = JSON.parse(responseText);
+  } catch (parseErr) {
+    throw new Error('INVALID_AUTH_TOKEN: Phản hồi từ Firebase không hợp lệ.');
+  }
+
+  if (statusCode !== 200 || !jsonResult.users || !jsonResult.users.length) {
+    const errMessage = jsonResult.error && jsonResult.error.message ? jsonResult.error.message : '';
+    if (errMessage.includes('TOKEN_EXPIRED') || errMessage.includes('EXPIRED')) {
+      throw new Error('AUTH_EXPIRED: Phiên đăng nhập Google đã hết hạn. Vui lòng làm mới token.');
+    }
+    throw new Error('INVALID_AUTH_TOKEN: Firebase ID Token không hợp lệ hoặc đã bị thu hồi.');
+  }
+
+  const user = jsonResult.users[0];
+  const uid = user.localId; // Immutable verified teacher UID
+  if (!uid) {
+    throw new Error('INVALID_AUTH_TOKEN: Không tìm thấy định danh UID giáo viên trong token.');
+  }
+
+  return {
+    uid: uid,
+    email: user.email || '',
+    displayName: user.displayName || '',
+    photoURL: user.photoUrl || user.photoURL || '',
+    emailVerified: Boolean(user.emailVerified)
+  };
+}
+
+/**
+ * Get Authenticated Request Context
+ */
+function getAuthenticatedContext(requestPayload) {
+  const token = requestPayload && requestPayload.idToken ? String(requestPayload.idToken).trim() : '';
+  if (!token) {
+    throw new Error('AUTH_REQUIRED: Thao tác này yêu cầu đăng nhập tài khoản Google Giáo viên.');
+  }
+  const authContext = verifyFirebaseIdToken(token);
+  assertUserEnabled(authContext.uid);
+  return authContext;
+}
+
+/**
+ * Enforce Game Session Ownership (Rule 30)
+ * Verifies that sessionId exists and belongs to authenticatedUid (or admin).
+ */
+function getOwnedSession(sessionId, authenticatedUid) {
+  if (!sessionId) {
+    throw new Error('MISSING_SESSION_ID: sessionId là bắt buộc.');
+  }
+  const sessionSheet = getSheet('GAME_SESSIONS');
+  const found = findRowById(sessionSheet, sessionId);
+  if (!found) {
+    throw new Error(`SESSION_NOT_FOUND: Phiên chơi '${sessionId}' không tồn tại.`);
+  }
+
+  const session = found.data;
+  const role = getUserRole(authenticatedUid);
+  if (role === 'ADMIN') {
+    return session;
+  }
+
+  // If session is owned by a teacher, caller must match
+  if (authenticatedUid && session.ownerUid && session.ownerUid !== authenticatedUid) {
+    throw new Error('FORBIDDEN: Bạn không có quyền truy cập hoặc ghi điểm vào phiên chơi của giáo viên khác.');
+  }
+
+  return session;
+}
+
+// ==========================================
+// 5. SECURE ROUTER & API ACTION REGISTRY (Rule 20)
 // ==========================================
 
 const API_ACTIONS = {
-  // 1. Settings
-  'settings.get': apiGetSettings,
+  // Public Actions (authRequired: false)
+  'system.health': { handler: apiHealthCheck, authRequired: false },
+  'settings.get': { handler: apiGetSettings, authRequired: false },
+  'games.list': { handler: apiListGames, authRequired: false },
+  'games.get': { handler: apiGetGame, authRequired: false },
 
-  // 2. Games Catalog
-  'games.list': apiListGames,
-  'games.get': apiGetGame,
+  // Teacher Profile & Preferences (authRequired: true)
+  'users.syncProfile': { handler: apiSyncUserProfile, authRequired: true },
+  'user.syncProfile': { handler: apiSyncUserProfile, authRequired: true },
+  'users.me': { handler: apiGetUser, authRequired: true },
+  'user.get': { handler: apiGetUser, authRequired: true },
+  'preferences.get': { handler: apiGetUserPreferences, authRequired: true },
+  'user.getPreferences': { handler: apiGetUserPreferences, authRequired: true },
+  'preferences.update': { handler: apiUpdateUserPreferences, authRequired: true },
+  'user.updatePreferences': { handler: apiUpdateUserPreferences, authRequired: true },
 
-  // 3. Classes CRUD
-  'classes.list': apiListClasses,
-  'classes.get': apiGetClass,
-  'classes.create': apiCreateClass,
-  'classes.update': apiUpdateClass,
-  'classes.delete': apiDeleteClass,
+  // Question Banks (authRequired: true)
+  'questionBanks.listMine': { handler: apiListQuestionBanksMine, authRequired: true },
+  'questionBanks.listForUser': { handler: apiListQuestionBanksMine, authRequired: true },
+  'questionBanks.list': { handler: apiListQuestionBanksMine, authRequired: true },
+  'questionBanks.get': { handler: apiGetQuestionBankSecure, authRequired: true },
+  'questionBanks.saveImported': { handler: apiSaveImportedQuestionBankSecure, authRequired: true },
+  'questionBanks.update': { handler: apiUpdateQuestionBankSecure, authRequired: true },
+  'questionBanks.disable': { handler: apiDisableQuestionBankSecure, authRequired: true },
+  'questions.listByBank': { handler: apiListQuestionsByBankSecure, authRequired: true },
+  'questions.get': { handler: apiGetQuestion, authRequired: true },
 
-  // 4. Question Banks CRUD & Persistence
-  'questionBanks.list': apiListQuestionBanks,
-  'questionBanks.get': apiGetQuestionBank,
-  'questionBanks.create': apiCreateQuestionBank,
-  'questionBanks.update': apiUpdateQuestionBank,
-  'questionBanks.delete': apiDeleteQuestionBank,
-  'questionBanks.disable': apiDisableQuestionBank,
-  'questionBanks.saveImported': apiSaveImportedQuestionBank,
+  // Classes (authRequired: true)
+  'classes.listMine': { handler: apiListClassesMine, authRequired: true },
+  'classes.list': { handler: apiListClassesMine, authRequired: true },
+  'classes.get': { handler: apiGetClass, authRequired: true },
+  'classes.create': { handler: apiCreateClassSecure, authRequired: true },
+  'classes.update': { handler: apiUpdateClassSecure, authRequired: true },
+  'classes.delete': { handler: apiDeleteClassSecure, authRequired: true },
 
-  // 5. Questions CRUD
-  'questions.list': apiListQuestions,
-  'questions.listByBank': apiListQuestionsByBank,
-  'questions.get': apiGetQuestion,
-  'questions.create': apiCreateQuestion,
-  'questions.update': apiUpdateQuestion,
-  'questions.delete': apiDeleteQuestion,
+  // Game Sessions (authRequired: true)
+  'sessions.create': { handler: apiCreateSession, authRequired: true },
+  'sessions.listMine': { handler: apiListSessionsMine, authRequired: true },
+  'sessions.listForUser': { handler: apiListSessionsMine, authRequired: true },
+  'sessions.list': { handler: apiListSessionsMine, authRequired: true },
+  'sessions.get': { handler: apiGetSessionSecure, authRequired: true },
+  'sessions.finish': { handler: apiFinishSessionSecure, authRequired: true },
 
-  // 6. Import Batch & Maintenance
-  'questions.importBatch': apiImportQuestionsBatch,
-  'teams.importBatch': apiImportTeamsBatch,
-  'imports.history.list': apiListImportHistory,
-  'database.repairCounts': apiRepairQuestionBankCounts,
-  'database.findOrphans': apiFindOrphans,
-  'database.testPersistence': apiTestQuestionBankPersistence,
+  // Teams & Scores (authRequired: true)
+  'teams.create': { handler: apiCreateTeamSecure, authRequired: true },
+  'teams.createBatch': { handler: apiCreateTeamsBatchSecure, authRequired: true },
+  'teams.listBySession': { handler: apiListTeamsBySession, authRequired: true },
+  'scores.addEvent': { handler: apiAddScoreEventSecure, authRequired: true },
+  'scores.listBySession': { handler: apiListScoresBySession, authRequired: true },
+  'scores.getBySession': { handler: apiListScoresBySession, authRequired: true },
 
-  // 7. Sessions API
-  'sessions.create': apiCreateSession,
-  'sessions.get': apiGetSession,
-  'sessions.update': apiUpdateSession,
-  'sessions.list': apiListSessions,
-  'sessions.listByClass': apiListSessionsByClass,
-  'sessions.finish': apiFinishSession,
-  'sessions.cancel': apiCancelSession,
+  // Game Results & Certificates (authRequired: true)
+  'results.listMine': { handler: apiListResultsMine, authRequired: true },
+  'results.listForUser': { handler: apiListResultsMine, authRequired: true },
+  'results.listBySession': { handler: apiListResultsBySession, authRequired: true },
+  'certificates.create': { handler: apiCreateCertificateSecure, authRequired: true },
+  'certificates.listMine': { handler: apiListCertificatesMine, authRequired: true },
+  'certificates.listForUser': { handler: apiListCertificatesMine, authRequired: true },
+  'imports.history.listMine': { handler: apiListImportHistoryMine, authRequired: true },
+  'imports.history.list': { handler: apiListImportHistoryMine, authRequired: true },
 
-  // 8. Teams API
-  'teams.create': apiCreateTeam,
-  'teams.createBatch': apiCreateTeamsBatch,
-  'teams.listBySession': apiListTeamsBySession,
-  'teams.get': apiGetTeam,
-  'teams.update': apiUpdateTeam,
-  'teams.delete': apiDeleteTeam,
-  'teams.getScore': apiGetTeamScore,
-  'teams.getLeaderboard': apiGetTeamLeaderboard,
+  // Game Specific Writing APIs (authRequired: true, Enforce getOwnedSession)
+  'camRace.race.add': { handler: apiCamRaceAddRaceSecure, authRequired: true },
+  'camRace.answer.add': { handler: apiCamRaceAddAnswerSecure, authRequired: true },
+  'camRace.question.complete': { handler: apiCamRaceCompleteQuestionSecure, authRequired: true },
+  'smileRace.gesture.add': { handler: apiSmileRaceAddGestureSecure, authRequired: true },
+  'smileRace.answer.add': { handler: apiSmileRaceAddAnswerSecure, authRequired: true },
+  'smileRace.question.complete': { handler: apiSmileRaceCompleteQuestionSecure, authRequired: true },
+  'fastestHand.buzz': { handler: apiFastestHandBuzzSecure, authRequired: true },
+  'fastestHand.answer': { handler: apiFastestHandAnswerSecure, authRequired: true },
+  'fastestHand.question.complete': { handler: apiFastestHandCompleteQuestionSecure, authRequired: true },
+  'luckyWheel.spin.add': { handler: apiLuckyWheelAddSpinSecure, authRequired: true },
+  'randomTeam.pick.add': { handler: apiRandomTeamAddPickSecure, authRequired: true },
+  'randomTeam.resetSession': { handler: apiRandomTeamResetSessionSecure, authRequired: true },
+  'teamChallenge.answer.add': { handler: apiTeamChallengeAddAnswerSecure, authRequired: true },
+  'teamChallenge.score.add': { handler: apiTeamChallengeAddScoreSecure, authRequired: true },
+  'teamChallenge.round.complete': { handler: apiTeamChallengeCompleteRoundSecure, authRequired: true },
 
-  // 9. Score Ledger Engine
-  'scores.addEvent': apiAddScoreEvent,
-  'scores.listBySession': apiListScoresBySession,
-  'scores.getBySession': apiListScoresBySession,
-  'scores.recalculate': apiRecalculateScores,
-
-  // 10. Cam Race API (2 Teams Blue/Orange, No biometrics)
-  'camRace.race.add': apiCamRaceAddRace,
-  'camRace.answer.add': apiCamRaceAddAnswer,
-  'camRace.question.complete': apiCamRaceCompleteQuestion,
-  'camRace.result.completeQuestion': apiCamRaceCompleteQuestion,
-  'camRace.history.listBySession': apiCamRaceListHistory,
-
-  // 11. Smile Race API (2-4 Teams, Gesture Score only, No Face/Biometrics)
-  'smileRace.gesture.add': apiSmileRaceAddGesture,
-  'smileRace.answer.add': apiSmileRaceAddAnswer,
-  'smileRace.question.complete': apiSmileRaceCompleteQuestion,
-  'smileRace.history.listBySession': apiSmileRaceListHistory,
-
-  // 12. Fastest Hand API (First buzz lock)
-  'fastestHand.buzz': apiFastestHandBuzz,
-  'fastestHand.answer': apiFastestHandAnswer,
-  'fastestHand.question.complete': apiFastestHandCompleteQuestion,
-  'fastestHand.history.listBySession': apiFastestHandListHistory,
-
-  // 13. Lucky Wheel API
-  'luckyWheel.spin.add': apiLuckyWheelAddSpin,
-  'luckyWheel.history.listBySession': apiLuckyWheelListHistory,
-
-  // 14. Random Team Picker API
-  'randomTeam.pick.add': apiRandomTeamAddPick,
-  'randomTeam.history.listBySession': apiRandomTeamListHistory,
-  'randomTeam.resetSession': apiRandomTeamResetSession,
-
-  // 15. Team Challenge API
-  'teamChallenge.answer.add': apiTeamChallengeAddAnswer,
-  'teamChallenge.score.add': apiTeamChallengeAddScore,
-  'teamChallenge.round.complete': apiTeamChallengeCompleteRound,
-  'teamChallenge.history.listBySession': apiTeamChallengeListHistory,
-
-  // 16. Progress & Results & Leaderboard
-  'progress.completeQuestion': apiProgressCompleteQuestion,
-  'results.listBySession': apiListResultsBySession,
-  'results.getWinner': apiGetWinnerBySession,
-  'leaderboard.bySession': apiGetLeaderboardBySession,
-  'leaderboard.top3': apiGetTop3Leaderboard,
-
-  // 17. Certificates (Team-Only)
-  'certificates.create': apiCreateCertificate,
-  'certificates.listBySession': apiListCertificatesBySession,
-  'certificates.get': apiGetCertificate,
-
-  // 18. Logs
-  'appLogs.list': apiListAppLogs,
-
-  // 19. Multi-User Teacher Profile & Workspace Preferences
-  'user.syncProfile': apiSyncUserProfile,
-  'user.get': apiGetUser,
-  'user.getPreferences': apiGetUserPreferences,
-  'user.updatePreferences': apiUpdateUserPreferences,
-
-  // 20. Multi-User Ownership Scoped Queries
-  'questionBanks.listForUser': apiListQuestionBanksForUser,
-  'questions.listByBankForUser': apiListQuestionsByBankForUser,
-  'sessions.listForUser': apiListSessionsForUser,
-  'results.listForUser': apiListResultsForUser,
-  'certificates.listForUser': apiListCertificatesForUser,
-
-  // 21. Multi-User Schema, Migration & Ownership Audit
-  'database.setupMultiUser': apiSetupMultiUserSchema,
-  'database.migrateMultiUser': apiMigrateMultiUserSchema,
-  'database.auditOwnership': apiAuditOwnership,
-  'database.repairQuestionOwnership': apiRepairQuestionOwnership,
-  'database.repairSessionOwnership': apiRepairSessionChildOwnership
+  // System Database Tools
+  'database.setupMultiUser': { handler: apiSetupMultiUserSchema, authRequired: false },
+  'database.migrateMultiUser': { handler: apiMigrateMultiUserSchema, authRequired: false },
+  'database.auditOwnership': { handler: apiAuditOwnership, authRequired: false },
+  'database.repairQuestionOwnership': { handler: apiRepairQuestionOwnership, authRequired: false },
+  'database.repairSessionOwnership': { handler: apiRepairSessionChildOwnership, authRequired: false },
+  'database.repairCounts': { handler: apiRepairQuestionBankCounts, authRequired: false },
+  'database.findOrphans': { handler: apiFindOrphans, authRequired: false },
+  'database.testPersistence': { handler: apiTestQuestionBankPersistence, authRequired: false }
 };
 
-function handleApiRequest(action, data) {
+function apiHealthCheck() {
+  return successResponse({
+    status: 'ONLINE',
+    platform: 'EDUPLAY',
+    authEngine: 'Firebase Identity Toolkit REST',
+    version: '3.0.0-multiuser',
+    timestamp: getCurrentTimestamp()
+  }, 'EDUPLAY Database Engine sẵn sàng hoạt động.');
+}
+
+function handleApiRequest(action, data, idToken) {
   if (!Object.prototype.hasOwnProperty.call(API_ACTIONS, action)) {
     return errorResponse('INVALID_ACTION', `Action '${action}' không nằm trong whitelist của EDUPLAY API.`);
   }
 
-  try {
-    const payload = data || {};
-    // Extract teacher authenticatedUid from payload (authUid or authenticatedUid)
-    const authenticatedUid = payload.authUid ? String(payload.authUid).trim() : (payload.authenticatedUid ? String(payload.authenticatedUid).trim() : '');
+  const actionConfig = API_ACTIONS[action];
+  let handler = actionConfig;
+  let authRequired = false;
 
-    // Nếu có authenticatedUid, kiểm tra xem tài khoản có bị vô hiệu hóa không (ngoại trừ action đăng nhập/đồng bộ profile)
-    if (authenticatedUid && action !== 'user.syncProfile') {
-      assertUserEnabled(authenticatedUid);
+  if (typeof actionConfig === 'object' && actionConfig !== null) {
+    handler = actionConfig.handler;
+    authRequired = Boolean(actionConfig.authRequired);
+  }
+
+  let authContext = null;
+  let authenticatedUid = '';
+
+  try {
+    // 1. Enforce ID Token verification for protected actions (Rule 16, 18, 19)
+    if (authRequired) {
+      if (!idToken) {
+        return errorResponse('AUTH_REQUIRED', 'Yêu cầu Firebase ID Token hợp lệ để thực hiện thao tác này.');
+      }
+      authContext = verifyFirebaseIdToken(idToken);
+      authenticatedUid = authContext.uid;
+
+      // Rule 23: assert user enabled (except syncProfile initial registration)
+      if (action !== 'users.syncProfile' && action !== 'user.syncProfile') {
+        assertUserEnabled(authenticatedUid);
+      }
+    } else if (idToken) {
+      // Optional authentication: verify token if present
+      try {
+        authContext = verifyFirebaseIdToken(idToken);
+        authenticatedUid = authContext.uid;
+      } catch (tokenErr) {
+        authenticatedUid = '';
+      }
     }
 
-    const handler = API_ACTIONS[action];
-    return handler(payload, authenticatedUid);
+    // 2. Strict Security (Rule 11): Delete any client-dictated ownerUid from payload
+    const payload = { ...(data || {}) };
+    if ('ownerUid' in payload) {
+      delete payload.ownerUid;
+    }
+
+    // 3. Dispatch to handler with verified authenticatedUid and authContext
+    return handler(payload, authenticatedUid, authContext);
   } catch (err) {
-    appendLog('ERROR', 'API', action, err.message || err.toString(), (data && data.sessionId) || '', data, (data && data.authUid) || '');
-    return errorResponse('EXECUTION_ERROR', `Lỗi khi thực thi action '${action}': ${err.message}`);
+    const errMessage = err.message || err.toString();
+    appendLog('ERROR', 'API', action, errMessage, (data && data.sessionId) || '', data, authenticatedUid);
+
+    if (errMessage.includes('AUTH_REQUIRED')) {
+      return errorResponse('AUTH_REQUIRED', errMessage);
+    }
+    if (errMessage.includes('AUTH_EXPIRED')) {
+      return errorResponse('AUTH_EXPIRED', errMessage);
+    }
+    if (errMessage.includes('INVALID_AUTH_TOKEN')) {
+      return errorResponse('INVALID_AUTH_TOKEN', errMessage);
+    }
+    if (errMessage.includes('FIREBASE_CONFIG_MISSING')) {
+      return errorResponse('FIREBASE_CONFIG_MISSING', errMessage);
+    }
+    if (errMessage.includes('FORBIDDEN')) {
+      return errorResponse('FORBIDDEN', errMessage);
+    }
+    if (errMessage.includes('USER_DISABLED') || errMessage.includes('vô hiệu hóa')) {
+      return errorResponse('USER_DISABLED', 'Tài khoản giáo viên của bạn đã bị vô hiệu hóa bởi Quản trị viên.');
+    }
+
+    return errorResponse('EXECUTION_ERROR', `Lỗi khi thực thi action '${action}': ${errMessage}`);
   }
+}
+
+// ==========================================
+// 6. SECURE WRAPPERS FOR TEACHER RESOURCES
+// ==========================================
+
+/**
+ * Question Banks for current teacher (Rule 25)
+ * Returns { mine: [...], system: [...] } and combined list
+ */
+function apiListQuestionBanksMine(data, authenticatedUid) {
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const lastRow = bankSheet.getLastRow();
+  if (lastRow <= 1) return successResponse({ mine: [], system: [], banks: [] });
+
+  const headers = getHeaders(bankSheet);
+  const dataRows = bankSheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const role = getUserRole(authenticatedUid);
+
+  const mine = [];
+  const system = [];
+
+  dataRows.forEach(row => {
+    const b = rowToObject(headers, row);
+    const isEnabled = b.enabled !== undefined ? normalizeBoolean(b.enabled, true) : true;
+    if (!isEnabled) return;
+
+    if (role === 'ADMIN') {
+      if (b.ownerUid === authenticatedUid) {
+        mine.push(b);
+      } else {
+        system.push(b);
+      }
+      return;
+    }
+
+    // Teacher's own private banks
+    if (authenticatedUid && b.ownerUid === authenticatedUid) {
+      mine.push(b);
+    } else if (b.visibility === 'SYSTEM' || (!b.ownerUid && b.visibility !== 'PRIVATE')) {
+      system.push(b);
+    }
+    // Note: NEVER return private banks belonging to other teachers
+  });
+
+  mine.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  system.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+  return successResponse({
+    mine: mine,
+    system: system,
+    banks: [...mine, ...system]
+  });
+}
+
+function apiGetQuestionBankSecure(data, authenticatedUid) {
+  requireFields(data, ['id']);
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const found = findRowById(bankSheet, data.id);
+  if (!found) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi.');
+
+  // Check read permission: if PRIVATE, must match authenticatedUid
+  assertOwnership(found.data.ownerUid, authenticatedUid, true, found.data.visibility);
+  return successResponse(found.data);
+}
+
+function apiSaveImportedQuestionBankSecure(data, authenticatedUid) {
+  // Enforce server-side verified authenticatedUid as ownerUid (Rule 26)
+  return saveImportedQuestionBank(data, authenticatedUid);
+}
+
+function apiUpdateQuestionBankSecure(data, authenticatedUid) {
+  requireFields(data, ['id']);
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const found = findRowById(bankSheet, data.id);
+  if (!found) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi.');
+
+  assertOwnership(found.data.ownerUid, authenticatedUid, false, found.data.visibility);
+  return apiUpdateQuestionBank(data, authenticatedUid);
+}
+
+function apiDisableQuestionBankSecure(data, authenticatedUid) {
+  requireFields(data, ['id']);
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const found = findRowById(bankSheet, data.id);
+  if (!found) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi.');
+
+  assertOwnership(found.data.ownerUid, authenticatedUid, false, found.data.visibility);
+  return apiDisableQuestionBank(data, authenticatedUid);
+}
+
+/**
+ * Questions List for Bank (Rule 27)
+ * Private bank: ownerUid must match authenticatedUid
+ * System bank: allow reading
+ */
+function apiListQuestionsByBankSecure(data, authenticatedUid) {
+  requireFields(data, ['bankId']);
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const bFound = findRowById(bankSheet, data.bankId);
+  if (!bFound) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi.');
+
+  // Assert reading access
+  assertOwnership(bFound.data.ownerUid, authenticatedUid, true, bFound.data.visibility);
+  return apiListQuestionsByBank(data);
+}
+
+/**
+ * Classes for Teacher (Rule 28)
+ */
+function apiListClassesMine(data, authenticatedUid) {
+  const sheet = getSheet('CLASSES');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+
+  const headers = getHeaders(sheet);
+  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const role = getUserRole(authenticatedUid);
+
+  const list = rows
+    .map(r => rowToObject(headers, r))
+    .filter(c => {
+      const isEnabled = c.enabled !== undefined ? normalizeBoolean(c.enabled, true) : true;
+      if (!isEnabled) return false;
+      if (role === 'ADMIN') return true;
+      if (!authenticatedUid) return !c.ownerUid;
+      return c.ownerUid === authenticatedUid || !c.ownerUid;
+    });
+
+  return successResponse(list);
+}
+
+function apiCreateClassSecure(data, authenticatedUid) {
+  requireFields(data, ['className']);
+  const sheet = getSheet('CLASSES');
+  const newClass = {
+    id: generateId('class'),
+    ownerUid: authenticatedUid || '',
+    classCode: sanitizeString(data.classCode) || `CLS-${Math.floor(1000 + Math.random() * 9000)}`,
+    className: sanitizeString(data.className),
+    grade: data.grade || 5,
+    schoolYear: sanitizeString(data.schoolYear) || '2025-2026',
+    teacherName: sanitizeString(data.teacherName) || '',
+    schoolName: sanitizeString(data.schoolName) || '',
+    subject: sanitizeString(data.subject) || 'Tin học',
+    enabled: data.enabled !== undefined ? Boolean(data.enabled) : true,
+    createdAt: getCurrentTimestamp(),
+    updatedAt: getCurrentTimestamp()
+  };
+  appendObject(sheet, newClass);
+  return successResponse(newClass, 'Đã tạo lớp học thành công.');
+}
+
+function apiUpdateClassSecure(data, authenticatedUid) {
+  requireFields(data, ['id']);
+  const sheet = getSheet('CLASSES');
+  const found = findRowById(sheet, data.id);
+  if (!found) return errorResponse('CLASS_NOT_FOUND', 'Không tìm thấy lớp học.');
+
+  assertOwnership(found.data.ownerUid, authenticatedUid, false);
+  const updated = updateObjectById(sheet, data.id, data);
+  return successResponse(updated, 'Đã cập nhật thông tin lớp học.');
+}
+
+function apiDeleteClassSecure(data, authenticatedUid) {
+  requireFields(data, ['id']);
+  const sheet = getSheet('CLASSES');
+  const found = findRowById(sheet, data.id);
+  if (!found) return errorResponse('CLASS_NOT_FOUND', 'Không tìm thấy lớp học để xóa.');
+
+  assertOwnership(found.data.ownerUid, authenticatedUid, false);
+  const deleted = deleteObjectById(sheet, data.id);
+  return successResponse({ deleted: true }, 'Đã xóa lớp học thành công.');
+}
+
+/**
+ * Sessions for Teacher (Rule 29, 36)
+ */
+function apiListSessionsMine(data, authenticatedUid) {
+  return apiListSessionsForUser(data, authenticatedUid);
+}
+
+function apiGetSessionSecure(data, authenticatedUid) {
+  requireFields(data, ['sessionId']);
+  const session = getOwnedSession(data.sessionId, authenticatedUid);
+  return successResponse(session);
+}
+
+function apiFinishSessionSecure(data, authenticatedUid) {
+  requireFields(data, ['sessionId']);
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiFinishSession(data, authenticatedUid);
+}
+
+function apiCreateTeamSecure(data, authenticatedUid) {
+  requireFields(data, ['sessionId', 'teamName']);
+  const session = getOwnedSession(data.sessionId, authenticatedUid);
+  const teamSheet = getSheet('TEAMS');
+  const newTeam = {
+    id: generateId('team'),
+    sessionId: data.sessionId,
+    ownerUid: session.ownerUid || authenticatedUid || '',
+    teamCode: sanitizeString(data.teamCode) || 'T1',
+    teamName: sanitizeString(data.teamName),
+    color: sanitizeString(data.color) || '#3B82F6',
+    score: 0,
+    roundWins: 0,
+    rank: 1,
+    createdAt: getCurrentTimestamp(),
+    updatedAt: getCurrentTimestamp()
+  };
+  appendObject(teamSheet, newTeam);
+  return successResponse(newTeam, 'Đã tạo đội thi đấu thành công.');
+}
+
+function apiCreateTeamsBatchSecure(data, authenticatedUid) {
+  requireFields(data, ['sessionId', 'teams']);
+  const session = getOwnedSession(data.sessionId, authenticatedUid);
+  const teamSheet = getSheet('TEAMS');
+  const createdTeams = [];
+
+  data.teams.forEach(t => {
+    const newTeam = {
+      id: generateId('team'),
+      sessionId: data.sessionId,
+      ownerUid: session.ownerUid || authenticatedUid || '',
+      teamCode: sanitizeString(t.teamCode) || 'T',
+      teamName: sanitizeString(t.teamName),
+      color: sanitizeString(t.color) || '#3B82F6',
+      score: 0,
+      roundWins: 0,
+      rank: 1,
+      createdAt: getCurrentTimestamp(),
+      updatedAt: getCurrentTimestamp()
+    };
+    appendObject(teamSheet, newTeam);
+    createdTeams.push(newTeam);
+  });
+
+  return successResponse(createdTeams, `Đã tạo ${createdTeams.length} đội thi đấu.`);
+}
+
+function apiAddScoreEventSecure(data, authenticatedUid) {
+  requireFields(data, ['sessionId', 'teamId', 'delta']);
+  const session = getOwnedSession(data.sessionId, authenticatedUid);
+  data.ownerUid = session.ownerUid || authenticatedUid || '';
+  return apiAddScoreEvent(data, authenticatedUid);
+}
+
+function apiListScoresBySessionSecure(data, authenticatedUid) {
+  requireFields(data, ['sessionId']);
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiListScoresBySession(data);
+}
+
+function apiListResultsMine(data, authenticatedUid) {
+  return apiListResultsForUser(data, authenticatedUid);
+}
+
+function apiCreateCertificateSecure(data, authenticatedUid) {
+  requireFields(data, ['sessionId', 'teamId']);
+  const session = getOwnedSession(data.sessionId, authenticatedUid);
+  data.ownerUid = session.ownerUid || authenticatedUid || '';
+  return apiCreateCertificate(data, authenticatedUid);
+}
+
+function apiListCertificatesMine(data, authenticatedUid) {
+  return apiListCertificatesForUser(data, authenticatedUid);
+}
+
+function apiListImportHistoryMine(data, authenticatedUid) {
+  const sheet = getSheet('IMPORT_HISTORY');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+
+  const headers = getHeaders(sheet);
+  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const role = getUserRole(authenticatedUid);
+
+  const list = rows
+    .map(r => rowToObject(headers, r))
+    .filter(imp => {
+      if (role === 'ADMIN') return true;
+      if (!authenticatedUid) return !imp.ownerUid;
+      return imp.ownerUid === authenticatedUid;
+    })
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+  return successResponse(list);
+}
+
+// Game specific secured handlers verifying getOwnedSession
+function apiCamRaceAddRaceSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiCamRaceAddRace(data, authenticatedUid);
+}
+
+function apiCamRaceAddAnswerSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiCamRaceAddAnswer(data, authenticatedUid);
+}
+
+function apiCamRaceCompleteQuestionSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiCamRaceCompleteQuestion(data, authenticatedUid);
+}
+
+function apiSmileRaceAddGestureSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiSmileRaceAddGesture(data, authenticatedUid);
+}
+
+function apiSmileRaceAddAnswerSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiSmileRaceAddAnswer(data, authenticatedUid);
+}
+
+function apiSmileRaceCompleteQuestionSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiSmileRaceCompleteQuestion(data, authenticatedUid);
+}
+
+function apiFastestHandBuzzSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiFastestHandBuzz(data, authenticatedUid);
+}
+
+function apiFastestHandAnswerSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiFastestHandAnswer(data, authenticatedUid);
+}
+
+function apiFastestHandCompleteQuestionSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiFastestHandCompleteQuestion(data, authenticatedUid);
+}
+
+function apiLuckyWheelAddSpinSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiLuckyWheelAddSpin(data, authenticatedUid);
+}
+
+function apiRandomTeamAddPickSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiRandomTeamAddPick(data, authenticatedUid);
+}
+
+function apiRandomTeamResetSessionSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiRandomTeamResetSession(data, authenticatedUid);
+}
+
+function apiTeamChallengeAddAnswerSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiTeamChallengeAddAnswer(data, authenticatedUid);
+}
+
+function apiTeamChallengeAddScoreSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiTeamChallengeAddScore(data, authenticatedUid);
+}
+
+function apiTeamChallengeCompleteRoundSecure(data, authenticatedUid) {
+  getOwnedSession(data.sessionId, authenticatedUid);
+  return apiTeamChallengeCompleteRound(data, authenticatedUid);
 }
 
 // ==========================================
@@ -3053,8 +3581,8 @@ function apiListAppLogs(data) {
 // 24. MULTI-USER TEACHER PROFILE & PREFERENCES API
 // ==========================================
 
-function apiSyncUserProfile(data, authenticatedUid) {
-  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+function apiSyncUserProfile(data, authenticatedUid, authContext) {
+  const targetUid = String(authenticatedUid || (authContext && authContext.uid) || data.authUid || '').trim();
   if (!targetUid) {
     return errorResponse('MISSING_AUTH_UID', 'authUid là bắt buộc để đồng bộ hồ sơ giáo viên.');
   }
@@ -3065,12 +3593,23 @@ function apiSyncUserProfile(data, authenticatedUid) {
   const existingUsers = findRowsByField(userSheet, 'authUid', targetUid);
   let userRecord = null;
 
+  // Use verified claims if available
+  const verifiedEmail = (authContext && authContext.email) || sanitizeString(data.email);
+  const verifiedDisplayName = (authContext && authContext.displayName) || sanitizeString(data.displayName);
+  const verifiedPhotoURL = (authContext && authContext.photoURL) || sanitizeString(data.photoURL || data.photoUrl);
+
   if (existingUsers.length > 0) {
     const existing = existingUsers[0];
+    const isEnabled = existing.data.enabled !== undefined ? normalizeBoolean(existing.data.enabled, true) : true;
+    const status = existing.data.status ? String(existing.data.status).toUpperCase() : (isEnabled ? 'ACTIVE' : 'DISABLED');
+    if (!isEnabled || status === 'DISABLED') {
+      throw new Error('Tài khoản giáo viên đã bị vô hiệu hóa bởi Quản trị viên.');
+    }
+
     const updates = {
-      email: sanitizeString(data.email) || existing.data.email,
-      displayName: sanitizeString(data.displayName) || existing.data.displayName,
-      photoURL: sanitizeString(data.photoURL || data.photoUrl) || existing.data.photoURL || '',
+      email: verifiedEmail || existing.data.email,
+      displayName: verifiedDisplayName || existing.data.displayName,
+      photoURL: verifiedPhotoURL || existing.data.photoURL || '',
       lastLoginAt: getCurrentTimestamp(),
       updatedAt: getCurrentTimestamp()
     };
@@ -3082,9 +3621,9 @@ function apiSyncUserProfile(data, authenticatedUid) {
     const newUser = {
       id: generateId('usr'),
       authUid: targetUid,
-      email: sanitizeString(data.email),
-      displayName: sanitizeString(data.displayName) || 'Giáo viên',
-      photoURL: sanitizeString(data.photoURL || data.photoUrl) || '',
+      email: verifiedEmail,
+      displayName: verifiedDisplayName || 'Giáo viên',
+      photoURL: verifiedPhotoURL || '',
       role: data.role === 'ADMIN' ? 'ADMIN' : 'TEACHER',
       enabled: true,
       createdAt: getCurrentTimestamp(),

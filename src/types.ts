@@ -287,33 +287,46 @@ export interface CertificateRecord {
 }
 
 export interface EduplayUser {
+  id?: string;
   authUid: string;
   email: string;
   displayName: string;
   photoUrl?: string;
+  photoURL?: string;
   schoolName?: string;
   defaultSubject?: string;
-  defaultGrade?: string;
+  defaultGrade?: string | number;
   role: 'ADMIN' | 'TEACHER';
-  status: 'ACTIVE' | 'DISABLED';
-  emailVerified: boolean;
+  status?: 'ACTIVE' | 'DISABLED';
+  enabled?: boolean;
+  emailVerified?: boolean;
   lastLoginAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface EduplayUserPreferences {
+  id?: string;
   authUid: string;
-  theme?: 'LIGHT' | 'DARK';
+  defaultSchoolName?: string;
+  defaultClassName?: string;
+  defaultSubject?: string;
+  defaultGrade?: number | string;
+  defaultQuestionCount?: number;
+  defaultTeamCount?: number;
   soundEnabled?: boolean;
+  animationEnabled?: boolean;
+  theme?: 'LIGHT' | 'DARK';
+  favoriteGameSlug?: string;
+  lastQuestionBankId?: string;
   bgmVolume?: number;
   sfxVolume?: number;
   camResolution?: '720p' | '1080p' | '480p';
   camConfidenceThreshold?: number;
   defaultCountdownSeconds?: number;
-  defaultQuestionCount?: number;
-  defaultTeamCount?: number;
   certificateAutoGenerate?: boolean;
+  createdAt?: string;
   updatedAt?: string;
 }
+
 
