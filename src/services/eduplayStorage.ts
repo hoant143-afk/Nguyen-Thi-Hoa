@@ -6,6 +6,7 @@ export const STORAGE_NAMESPACES = {
   CLASSES: 'eduplay_classes_v1',
   QUESTIONS: 'eduplay_questions_bank_v1',
   MATCH_HISTORY: 'eduplay_match_history_v1',
+  SESSION_HISTORY: 'eduplay_match_history_v1',
   QUIZ_BATTLE: 'eduplay_quizbattle_state_v1',
   LUCKY_WHEEL: 'eduplay_luckywheel_config_v1',
   FASTEST_HAND: 'eduplay_fastesthand_state_v1',
@@ -101,5 +102,23 @@ export class EduplayStorage {
     } catch (e) {
       console.error(`Error saving ${namespace} data`, e);
     }
+  }
+
+  public static saveGameData<T>(namespace: string, value: T): void {
+    this.setGameData(namespace, value);
+  }
+
+  // System Settings Helper
+  public static getSettings(): Record<string, any> {
+    return this.getGameData('eduplay_system_settings_v1', {
+      schoolName: 'TRƯỜNG TIỂU HỌC CHU VĂN AN',
+      className: '5A1',
+      teacherName: 'Thầy Hoàng',
+      defaultTeamCount: 4,
+    });
+  }
+
+  public static saveSettings(settings: Record<string, any>): void {
+    this.setGameData('eduplay_system_settings_v1', settings);
   }
 }

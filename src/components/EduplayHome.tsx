@@ -78,12 +78,12 @@ export const EduplayHome: React.FC<EduplayHomeProps> = ({
           {/* Slogan & Title */}
           <div className="space-y-2">
             <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-slate-900 tracking-tight leading-tight">
-              Học vui – Chơi chất <br className="hidden sm:inline" />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-rose-600 via-pink-600 to-indigo-600">
-                Tương tác thật cùng EDUPLAY
-              </span>
+              EDUPLAY
             </h1>
-            <p className="text-slate-600 text-sm md:text-base max-w-2xl mx-auto leading-relaxed">
+            <p className="text-lg md:text-xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-rose-600 via-pink-600 to-indigo-600">
+              “Hệ thống trò chơi tương tác lớp học”
+            </p>
+            <p className="text-slate-600 text-xs sm:text-sm max-w-2xl mx-auto leading-relaxed pt-1">
               Hệ thống trò chơi tương tác đa năng dành riêng cho giáo viên và học sinh trên máy chiếu:
               Webcam AI nhận diện thẻ màu, chuông bấm tốc độ cao, vòng quay may mắn và bảng thi đua nhóm trực quan.
             </p>
@@ -205,11 +205,22 @@ export const EduplayHome: React.FC<EduplayHomeProps> = ({
                       {iconElement}
                     </div>
 
-                    <span
-                      className={`text-xs font-black px-3 py-1 rounded-full border ${game.theme.badgeBg} ${game.theme.badgeText}`}
-                    >
-                      {game.badge}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
+                          game.supportsCamera
+                            ? 'bg-cyan-500/15 text-cyan-700 border-cyan-400/40'
+                            : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        {game.supportsCamera ? '📷 Có Webcam' : '❌ Không cần Webcam'}
+                      </span>
+                      <span
+                        className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${game.theme.badgeBg} ${game.theme.badgeText}`}
+                      >
+                        {game.badge}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Title & Subtitle */}
@@ -230,14 +241,16 @@ export const EduplayHome: React.FC<EduplayHomeProps> = ({
                   {/* Suitable Subjects & Players Info */}
                   <div className="space-y-2 py-3 border-t border-rose-100 text-[11px]">
                     <div className="flex items-center justify-between text-slate-500">
+                      <span>Số đội hỗ trợ:</span>
+                      <span className="font-extrabold text-slate-900 px-2 py-0.5 rounded-md bg-rose-50 border border-rose-100">
+                        {game.players}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-500">
                       <span>Môn phù hợp:</span>
                       <strong className="text-slate-800 text-right truncate max-w-[180px]">
                         {game.suitableSubject}
                       </strong>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-500">
-                      <span>Số người chơi:</span>
-                      <strong className="text-slate-800">{game.players}</strong>
                     </div>
                   </div>
                 </div>
@@ -249,9 +262,9 @@ export const EduplayHome: React.FC<EduplayHomeProps> = ({
                       e.stopPropagation();
                       handleGameClick(game.id);
                     }}
-                    className={`w-full py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 text-white bg-gradient-to-r ${game.theme.gradient} group-hover:shadow-lg transition-all active:scale-95 shadow-md`}
+                    className={`w-full py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 text-white bg-gradient-to-r ${game.theme.gradient} group-hover:shadow-lg transition-all active:scale-95 shadow-md cursor-pointer`}
                   >
-                    <span>VÀO CHƠI NGAY</span>
+                    <span>CHƠI NGAY</span>
                     <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </button>
                 </div>

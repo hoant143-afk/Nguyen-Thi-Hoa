@@ -33,13 +33,13 @@ const EDUPLAY_SCHEMAS = {
   ],
   QUESTION_BANKS: [
     'id', 'bankCode', 'name', 'subject', 'grade', 'topic', 'description',
-    'questionCount', 'enabled', 'createdAt', 'updatedAt'
+    'questionCount', 'enabled', 'importId', 'sourceFileName', 'createdAt', 'updatedAt'
   ],
   QUESTIONS: [
     'id', 'bankId', 'order', 'subject', 'grade', 'topic', 'questionType',
     'question', 'optionA', 'optionB', 'optionC', 'optionD', 'correctAnswer',
     'explanation', 'difficulty', 'normalPoints', 'specialPoints', 'isSpecial',
-    'enabled', 'tags', 'createdAt', 'updatedAt'
+    'enabled', 'tags', 'importId', 'createdAt', 'updatedAt'
   ],
   GAME_SESSIONS: [
     'id', 'sessionCode', 'gameId', 'gameSlug', 'activityName', 'classId',
@@ -96,8 +96,8 @@ const EDUPLAY_SCHEMAS = {
     'schoolName', 'certificateCode', 'issuedAt'
   ],
   IMPORT_HISTORY: [
-    'id', 'importType', 'fileName', 'fileType', 'targetBankId', 'totalRows',
-    'createdRows', 'updatedRows', 'skippedRows', 'errorRows', 'mode', 'createdAt'
+    'id', 'importId', 'importType', 'fileName', 'fileType', 'targetBankId', 'totalRows',
+    'createdRows', 'updatedRows', 'skippedRows', 'errorRows', 'mode', 'status', 'errorMessage', 'createdAt', 'completedAt'
   ],
   APP_LOGS: [
     'id', 'level', 'module', 'action', 'message', 'sessionId', 'payload', 'createdAt'
@@ -113,11 +113,15 @@ function onOpen() {
   ui.createMenu('🎓 EDUPLAY')
     .addItem('⚙️ Setup / Update Database', 'setupDatabase')
     .addSeparator()
-    .addItem('🎮 Update Game Catalog', 'menuSeedCatalog')
     .addItem('📝 Seed 15 Questions', 'menuSeedQuestions')
-    .addItem('🔄 Migrate Legacy Database', 'migrateLegacyDatabase')
-    .addSeparator()
+    .addItem('🧪 Test Question Persistence', 'testQuestionBankPersistence')
     .addItem('📊 Database Summary', 'showDatabaseSummary')
+    .addSeparator()
+    .addItem('🔧 Đồng bộ số lượng câu (Repair Counts)', 'repairQuestionBankCounts')
+    .addItem('🔍 Kiểm tra câu hỏi lạc (Find Orphans)', 'menuFindOrphans')
+    .addSeparator()
+    .addItem('🎮 Update Game Catalog', 'menuSeedCatalog')
+    .addItem('🔄 Migrate Legacy Database', 'migrateLegacyDatabase')
     .addToUi();
 }
 
@@ -132,6 +136,16 @@ function menuSeedQuestions() {
   seedQuestionBanks(ss);
   seedQuestions(ss);
   SpreadsheetApp.getUi().alert('📝 Đã nạp 15 câu hỏi Tin học 5 vào ngân hàng câu hỏi!');
+}
+
+function menuFindOrphans() {
+  const result = findOrphanQuestions();
+  const ui = SpreadsheetApp.getUi();
+  if (result.orphanCount === 0) {
+    ui.alert('TẤT CẢ CÂU HỎI HỢP LỆ', 'Không phát hiện câu hỏi nào bị mồ côi (tất cả đều có bankId hợp lệ).', ui.ButtonSet.OK);
+  } else {
+    ui.alert('PHÁT HIỆN CÂU HỎI MỒ CÔI', `Có ${result.orphanCount} câu hỏi không có bankId hợp lệ trong hệ thống. Vui lòng kiểm tra chi tiết trong APP_LOGS.`, ui.ButtonSet.OK);
+  }
 }
 
 // ==========================================
@@ -233,12 +247,14 @@ const API_ACTIONS = {
   'classes.update': apiUpdateClass,
   'classes.delete': apiDeleteClass,
 
-  // 4. Question Banks CRUD
+  // 4. Question Banks CRUD & Persistence
   'questionBanks.list': apiListQuestionBanks,
   'questionBanks.get': apiGetQuestionBank,
   'questionBanks.create': apiCreateQuestionBank,
   'questionBanks.update': apiUpdateQuestionBank,
   'questionBanks.delete': apiDeleteQuestionBank,
+  'questionBanks.disable': apiDisableQuestionBank,
+  'questionBanks.saveImported': apiSaveImportedQuestionBank,
 
   // 5. Questions CRUD
   'questions.list': apiListQuestions,
@@ -248,10 +264,13 @@ const API_ACTIONS = {
   'questions.update': apiUpdateQuestion,
   'questions.delete': apiDeleteQuestion,
 
-  // 6. Import Batch
+  // 6. Import Batch & Maintenance
   'questions.importBatch': apiImportQuestionsBatch,
   'teams.importBatch': apiImportTeamsBatch,
   'imports.history.list': apiListImportHistory,
+  'database.repairCounts': apiRepairQuestionBankCounts,
+  'database.findOrphans': apiFindOrphans,
+  'database.testPersistence': apiTestQuestionBankPersistence,
 
   // 7. Sessions API
   'sessions.create': apiCreateSession,
@@ -606,16 +625,172 @@ function apiDeleteClass(data) {
 }
 
 // ==========================================
-// 9. API HANDLERS - QUESTION BANKS CRUD
+// 9. API HANDLERS - QUESTION BANKS CRUD & PERSISTENCE
 // ==========================================
 
-function apiListQuestionBanks() {
+function normalizeCorrectAnswer(val) {
+  if (val === undefined || val === null) return '';
+  let str = String(val).trim().toUpperCase();
+  str = str.replace(/[\.\)\:\-\s]/g, '');
+  if (['A', 'B', 'C', 'D'].includes(str)) return str;
+  if (str === '0') return 'A';
+  if (str === '1') return 'B';
+  if (str === '2') return 'C';
+  if (str === '3') return 'D';
+  const match = str.match(/^[ABCD]/);
+  if (match) return match[0];
+  return str;
+}
+
+function normalizeBoolean(val, defaultValue) {
+  if (val === undefined || val === null || val === '') {
+    return defaultValue !== undefined ? defaultValue : false;
+  }
+  if (typeof val === 'boolean') return val;
+  const s = String(val).trim().toLowerCase();
+  if (['true', '1', 'có', 'co', 'yes', 'y', 'x', 'đúng', 'dung'].includes(s)) return true;
+  if (['false', '0', 'không', 'khong', 'no', 'n', 'sai'].includes(s)) return false;
+  return defaultValue !== undefined ? defaultValue : false;
+}
+
+function generateBankCode(subject, grade) {
+  const cleanSubject = sanitizeString(subject || 'ALL')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 8) || 'GEN';
+  const gradeStr = grade ? String(grade) : '';
+  const rand = Utilities.getUuid().replace(/-/g, '').substring(0, 6).toUpperCase();
+  return `QB-${cleanSubject}${gradeStr}-${rand}`;
+}
+
+function countQuestionsInBank(bankId) {
+  if (!bankId) return 0;
+  const sheet = getSheet('QUESTIONS');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return 0;
+  const headers = getHeaders(sheet);
+  const bankIdCol = headers.indexOf('bankId');
+  const enabledCol = headers.indexOf('enabled');
+  if (bankIdCol === -1) return 0;
+
+  const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  let count = 0;
+  for (let i = 0; i < data.length; i++) {
+    const rowBankId = String(data[i][bankIdCol]);
+    const rowEnabled = enabledCol !== -1 ? data[i][enabledCol] : true;
+    if (rowBankId === String(bankId) && normalizeBoolean(rowEnabled, true)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function listQuestionBanks() {
   const sheet = getSheet('QUESTION_BANKS');
   const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return successResponse([]);
+  if (lastRow <= 1) return [];
   const headers = getHeaders(sheet);
-  const list = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues()
-    .map(row => rowToObject(headers, row));
+  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+
+  return rows
+    .map(r => rowToObject(headers, r))
+    .filter(b => normalizeBoolean(b.enabled, true))
+    .sort((a, b) => {
+      const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return timeB - timeA;
+    });
+}
+
+function createQuestionBank(data) {
+  if (!data || !data.name || !String(data.name).trim()) {
+    throw new Error('Tên bộ câu hỏi (name) là bắt buộc.');
+  }
+
+  const sheet = getSheet('QUESTION_BANKS');
+  const id = generateId('bank');
+  const subject = sanitizeString(data.subject) || 'Chưa phân loại';
+  const grade = (data.grade !== undefined && data.grade !== null && String(data.grade).trim() !== '')
+    ? Number(data.grade)
+    : '';
+  const bankCode = (data.bankCode && String(data.bankCode).trim())
+    ? sanitizeString(data.bankCode)
+    : generateBankCode(subject, grade);
+
+  const bank = {
+    id: id,
+    bankCode: bankCode,
+    name: sanitizeString(data.name),
+    subject: subject,
+    grade: grade,
+    topic: sanitizeString(data.topic) || '',
+    description: sanitizeString(data.description) || '',
+    questionCount: 0,
+    enabled: true,
+    importId: sanitizeString(data.importId) || '',
+    sourceFileName: sanitizeString(data.sourceFileName || data.fileName) || '',
+    createdAt: getCurrentTimestamp(),
+    updatedAt: getCurrentTimestamp()
+  };
+
+  appendObject(sheet, bank);
+  appendLog('INFO', 'QUESTION_BANK', 'QUESTION_BANK_CREATED', `Tạo mới ngân hàng câu hỏi: ${bank.name} (${bank.id})`, '', {
+    bankId: bank.id,
+    bankCode: bank.bankCode,
+    name: bank.name
+  });
+
+  return bank;
+}
+
+function updateQuestionBank(bankId, updates) {
+  if (!bankId) throw new Error('Thiếu bankId để cập nhật.');
+  const sheet = getSheet('QUESTION_BANKS');
+  const found = findRowById(sheet, bankId);
+  if (!found) return null;
+
+  const allowedUpdates = {};
+  if (updates.name !== undefined && String(updates.name).trim()) {
+    allowedUpdates.name = sanitizeString(updates.name);
+  }
+  if (updates.subject !== undefined) {
+    allowedUpdates.subject = sanitizeString(updates.subject);
+  }
+  if (updates.grade !== undefined) {
+    allowedUpdates.grade = updates.grade !== '' ? Number(updates.grade) : '';
+  }
+  if (updates.topic !== undefined) {
+    allowedUpdates.topic = sanitizeString(updates.topic);
+  }
+  if (updates.description !== undefined) {
+    allowedUpdates.description = sanitizeString(updates.description);
+  }
+  if (updates.enabled !== undefined) {
+    allowedUpdates.enabled = normalizeBoolean(updates.enabled, true);
+  }
+  allowedUpdates.updatedAt = getCurrentTimestamp();
+
+  const updated = updateObjectById(sheet, bankId, allowedUpdates);
+  appendLog('INFO', 'QUESTION_BANK', 'QUESTION_BANK_UPDATED', `Cập nhật thông tin ngân hàng câu hỏi (${bankId})`, '', allowedUpdates);
+  return updated;
+}
+
+function disableQuestionBank(bankId) {
+  if (!bankId) throw new Error('Thiếu bankId để vô hiệu hóa.');
+  const sheet = getSheet('QUESTION_BANKS');
+  const found = findRowById(sheet, bankId);
+  if (!found) return null;
+
+  const updated = updateObjectById(sheet, bankId, {
+    enabled: false,
+    updatedAt: getCurrentTimestamp()
+  });
+
+  appendLog('INFO', 'QUESTION_BANK', 'QUESTION_BANK_DISABLED', `Vô hiệu hóa ngân hàng câu hỏi: ${found.data.name} (${bankId})`, '', { bankId: bankId });
+  return updated;
+}
+
+function apiListQuestionBanks() {
+  const list = listQuestionBanks();
   return successResponse(list);
 }
 
@@ -628,39 +803,41 @@ function apiGetQuestionBank(data) {
 }
 
 function apiCreateQuestionBank(data) {
-  requireFields(data, ['name']);
-  const sheet = getSheet('QUESTION_BANKS');
-  const bank = {
-    id: generateId('bank'),
-    bankCode: sanitizeString(data.bankCode) || `BANK_${Math.floor(1000 + Math.random() * 9000)}`,
-    name: sanitizeString(data.name),
-    subject: sanitizeString(data.subject) || 'Tin học',
-    grade: Number(data.grade) || 5,
-    topic: sanitizeString(data.topic) || '',
-    description: sanitizeString(data.description) || '',
-    questionCount: 0,
-    enabled: true,
-    createdAt: getCurrentTimestamp(),
-    updatedAt: getCurrentTimestamp()
-  };
-  appendObject(sheet, bank);
-  return successResponse(bank, 'Đã tạo ngân hàng câu hỏi mới');
+  try {
+    const bank = createQuestionBank(data);
+    return successResponse(bank, 'Đã tạo ngân hàng câu hỏi mới');
+  } catch (err) {
+    return errorResponse('CREATE_BANK_FAILED', err.message);
+  }
 }
 
 function apiUpdateQuestionBank(data) {
   requireFields(data, ['id']);
-  const sheet = getSheet('QUESTION_BANKS');
-  const updated = updateObjectById(sheet, data.id, data);
-  if (!updated) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
-  return successResponse(updated, 'Đã cập nhật ngân hàng câu hỏi');
+  try {
+    const updated = updateQuestionBank(data.id, data);
+    if (!updated) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
+    return successResponse(updated, 'Đã cập nhật ngân hàng câu hỏi');
+  } catch (err) {
+    return errorResponse('UPDATE_BANK_FAILED', err.message);
+  }
 }
 
 function apiDeleteQuestionBank(data) {
   requireFields(data, ['id']);
-  const sheet = getSheet('QUESTION_BANKS');
-  const deleted = deleteObjectById(sheet, data.id);
-  if (!deleted) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng để xóa');
-  return successResponse({ deleted: true }, 'Đã xóa ngân hàng câu hỏi');
+  const disabled = disableQuestionBank(data.id);
+  if (!disabled) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng để xóa');
+  return successResponse({ deleted: true, id: data.id }, 'Đã vô hiệu hóa ngân hàng câu hỏi');
+}
+
+function apiDisableQuestionBank(data) {
+  requireFields(data, ['id']);
+  const disabled = disableQuestionBank(data.id);
+  if (!disabled) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
+  return successResponse(disabled, 'Đã vô hiệu hóa ngân hàng câu hỏi');
+}
+
+function apiSaveImportedQuestionBank(data) {
+  return saveImportedQuestionBank(data);
 }
 
 // ==========================================
@@ -674,7 +851,7 @@ function formatQuestionResponse(q) {
     order: Number(q.order) || 1,
     subject: q.subject,
     grade: Number(q.grade) || 5,
-    topic: q.topic,
+    topic: q.topic || '',
     questionType: q.questionType || 'multiple_choice',
     question: q.question,
     options: {
@@ -683,15 +860,32 @@ function formatQuestionResponse(q) {
       C: q.optionC || '',
       D: q.optionD || ''
     },
+    optionA: q.optionA || '',
+    optionB: q.optionB || '',
+    optionC: q.optionC || '',
+    optionD: q.optionD || '',
     correctAnswer: q.correctAnswer || 'A',
     explanation: q.explanation || '',
     difficulty: q.difficulty || 'MEDIUM',
     normalPoints: Number(q.normalPoints) || 10,
     specialPoints: Number(q.specialPoints) || 20,
-    isSpecial: q.isSpecial === true || String(q.isSpecial).toUpperCase() === 'TRUE',
-    enabled: q.enabled !== false && String(q.enabled).toUpperCase() !== 'FALSE',
-    tags: q.tags || ''
+    isSpecial: normalizeBoolean(q.isSpecial, false),
+    enabled: normalizeBoolean(q.enabled, true),
+    tags: q.tags || '',
+    importId: q.importId || '',
+    createdAt: q.createdAt,
+    updatedAt: q.updatedAt
   };
+}
+
+function listQuestionsByBank(bankId) {
+  if (!bankId) return [];
+  const sheet = getSheet('QUESTIONS');
+  const found = findRowsByField(sheet, 'bankId', bankId);
+  return found
+    .map(f => formatQuestionResponse(f.data))
+    .filter(q => q.enabled)
+    .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
 }
 
 function apiListQuestions(data) {
@@ -708,12 +902,7 @@ function apiListQuestions(data) {
 
 function apiListQuestionsByBank(data) {
   requireFields(data, ['bankId']);
-  const sheet = getSheet('QUESTIONS');
-  const found = findRowsByField(sheet, 'bankId', data.bankId);
-  const questions = found
-    .map(f => formatQuestionResponse(f.data))
-    .filter(q => q.enabled)
-    .sort((a, b) => a.order - b.order);
+  const questions = listQuestionsByBank(data.bankId);
   return successResponse(questions);
 }
 
@@ -728,6 +917,7 @@ function apiGetQuestion(data) {
 function apiCreateQuestion(data) {
   requireFields(data, ['bankId', 'question', 'correctAnswer']);
   const sheet = getSheet('QUESTIONS');
+  const correctAns = normalizeCorrectAnswer(data.correctAnswer);
   const q = {
     id: generateId('q'),
     bankId: data.bankId,
@@ -741,18 +931,25 @@ function apiCreateQuestion(data) {
     optionB: sanitizeString(data.optionB || (data.options && data.options.B)),
     optionC: sanitizeString(data.optionC || (data.options && data.options.C)),
     optionD: sanitizeString(data.optionD || (data.options && data.options.D)),
-    correctAnswer: String(data.correctAnswer).trim().toUpperCase(),
+    correctAnswer: correctAns,
     explanation: sanitizeString(data.explanation),
     difficulty: data.difficulty || 'MEDIUM',
     normalPoints: Number(data.normalPoints) || 10,
     specialPoints: Number(data.specialPoints) || 20,
-    isSpecial: Boolean(data.isSpecial),
-    enabled: true,
+    isSpecial: normalizeBoolean(data.isSpecial, false),
+    enabled: normalizeBoolean(data.enabled, true),
     tags: sanitizeString(data.tags),
+    importId: sanitizeString(data.importId) || '',
     createdAt: getCurrentTimestamp(),
     updatedAt: getCurrentTimestamp()
   };
   appendObject(sheet, q);
+
+  // Update bank question count
+  const actualCount = countQuestionsInBank(data.bankId);
+  const bankSheet = getSheet('QUESTION_BANKS');
+  updateObjectById(bankSheet, data.bankId, { questionCount: actualCount, updatedAt: getCurrentTimestamp() });
+
   return successResponse(formatQuestionResponse(q), 'Đã thêm câu hỏi mới');
 }
 
@@ -766,127 +963,538 @@ function apiUpdateQuestion(data) {
     if (data.options.C !== undefined) updates.optionC = data.options.C;
     if (data.options.D !== undefined) updates.optionD = data.options.D;
   }
+  if (data.correctAnswer !== undefined) {
+    updates.correctAnswer = normalizeCorrectAnswer(data.correctAnswer);
+  }
+  if (data.isSpecial !== undefined) {
+    updates.isSpecial = normalizeBoolean(data.isSpecial, false);
+  }
+  if (data.enabled !== undefined) {
+    updates.enabled = normalizeBoolean(data.enabled, true);
+  }
   const updated = updateObjectById(sheet, data.id, updates);
   if (!updated) return errorResponse('QUESTION_NOT_FOUND', 'Không tìm thấy câu hỏi');
+
+  if (updated.bankId) {
+    const actualCount = countQuestionsInBank(updated.bankId);
+    const bankSheet = getSheet('QUESTION_BANKS');
+    updateObjectById(bankSheet, updated.bankId, { questionCount: actualCount, updatedAt: getCurrentTimestamp() });
+  }
+
   return successResponse(formatQuestionResponse(updated), 'Đã cập nhật câu hỏi');
 }
 
 function apiDeleteQuestion(data) {
   requireFields(data, ['id']);
   const sheet = getSheet('QUESTIONS');
+  const found = findRowById(sheet, data.id);
+  if (!found) return errorResponse('QUESTION_NOT_FOUND', 'Không tìm thấy câu hỏi');
+  const bankId = found.data.bankId;
   const deleted = deleteObjectById(sheet, data.id);
-  if (!deleted) return errorResponse('QUESTION_NOT_FOUND', 'Không tìm thấy câu hỏi');
+  if (!deleted) return errorResponse('QUESTION_NOT_FOUND', 'Không tìm thấy câu hỏi để xóa');
+
+  if (bankId) {
+    const actualCount = countQuestionsInBank(bankId);
+    const bankSheet = getSheet('QUESTION_BANKS');
+    updateObjectById(bankSheet, bankId, { questionCount: actualCount, updatedAt: getCurrentTimestamp() });
+  }
+
   return successResponse({ deleted: true }, 'Đã xóa câu hỏi');
 }
 
 // ==========================================
-// 11. API HANDLERS - IMPORT BATCH
+// 11. BATCH IMPORT & PERSISTENCE ENGINE
 // ==========================================
 
-function apiImportQuestionsBatch(data) {
-  requireFields(data, ['bankId', 'rows']);
-  const bankId = data.bankId;
-  const mode = data.mode || 'CREATE';
-  const rows = Array.isArray(data.rows) ? data.rows : [];
-
+function importQuestionsBatch(bankId, rows, options) {
+  if (!bankId) throw new Error('bankId là bắt buộc khi import questions.');
+  const opts = options || {};
+  const mode = (opts.mode || 'CREATE').toUpperCase();
+  const importId = opts.importId || '';
   const sheet = getSheet('QUESTIONS');
-  const historySheet = getSheet('IMPORT_HISTORY');
+  const headers = getHeaders(sheet);
+
+  // Load existing questions for this bank for duplicate checking
+  const existingMap = new Map();
+  const existingIdMap = new Map();
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+    const bankIdCol = headers.indexOf('bankId');
+    const idCol = headers.indexOf('id');
+    const qCol = headers.indexOf('question');
+
+    for (let i = 0; i < data.length; i++) {
+      const rowBankId = String(data[i][bankIdCol]);
+      if (rowBankId === String(bankId)) {
+        const rowId = String(data[i][idCol]);
+        const rowQ = String(data[i][qCol] || '').trim().toLowerCase();
+        const item = { rowIndex: i + 2, data: rowToObject(headers, data[i]) };
+        if (rowId) existingIdMap.set(rowId, item);
+        if (rowQ) existingMap.set(rowQ, item);
+      }
+    }
+  }
 
   let created = 0;
   let updated = 0;
   let skipped = 0;
   let failed = 0;
   const errors = [];
+  const rowsToAppend = [];
+  const now = getCurrentTimestamp();
 
-  rows.forEach((r, idx) => {
+  // Get current max order
+  let currentMaxOrder = 0;
+  const orderCol = headers.indexOf('order');
+  if (lastRow > 1 && orderCol !== -1) {
+    const orderData = sheet.getRange(2, orderCol + 1, lastRow - 1, 1).getValues();
+    orderData.forEach(r => {
+      const o = Number(r[0]);
+      if (!isNaN(o) && o > currentMaxOrder) currentMaxOrder = o;
+    });
+  }
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    const r = rows[idx];
+    const rowNum = idx + 1;
+
     try {
-      if (!r.question || !r.correctAnswer) {
+      // 1. Validate question text
+      const qText = sanitizeString(r.question || r.q || r.content);
+      if (!qText) {
         failed++;
-        errors.push(`Dòng ${idx + 1}: Thiếu nội dung câu hỏi hoặc đáp án đúng.`);
-        return;
+        errors.push({
+          row: rowNum,
+          question: '',
+          code: 'MISSING_QUESTION_TEXT',
+          message: 'Nội dung câu hỏi không được để trống.'
+        });
+        continue;
       }
 
-      const qText = sanitizeString(r.question);
-      const existing = findRowsByField(sheet, 'question', qText);
+      // 2. Question type
+      let qType = r.questionType || 'multiple_choice';
+      const validTypes = ['multiple_choice', 'true_false', 'short_answer', 'fill_blank', 'sorting', 'drag_drop'];
+      if (!validTypes.includes(qType)) {
+        qType = 'multiple_choice';
+      }
 
-      if (existing.length > 0) {
-        if (mode === 'SKIP') {
-          skipped++;
-          return;
-        } else if (mode === 'UPDATE') {
-          updateObjectById(sheet, existing[0].data.id, {
-            ...r,
-            bankId: bankId,
-            optionA: r.optionA || (r.options && r.options.A),
-            optionB: r.optionB || (r.options && r.options.B),
-            optionC: r.optionC || (r.options && r.options.C),
-            optionD: r.optionD || (r.options && r.options.D)
+      // 3. Options
+      const optA = sanitizeString(r.optionA || (r.options && r.options.A) || (r.options && r.options[0]));
+      const optB = sanitizeString(r.optionB || (r.options && r.options.B) || (r.options && r.options[1]));
+      const optC = sanitizeString(r.optionC || (r.options && r.options.C) || (r.options && r.options[2]));
+      const optD = sanitizeString(r.optionD || (r.options && r.options.D) || (r.options && r.options[3]));
+
+      // 4. Correct answer
+      const rawAns = r.correctAnswer !== undefined ? r.correctAnswer : (r.answer !== undefined ? r.answer : '');
+      const correctAns = normalizeCorrectAnswer(rawAns);
+
+      // Validate multiple choice
+      if (qType === 'multiple_choice') {
+        if (!optA || !optB) {
+          failed++;
+          errors.push({
+            row: rowNum,
+            question: qText,
+            code: 'MISSING_OPTIONS',
+            message: 'Câu hỏi trắc nghiệm cần tối thiểu 2 phương án A và B.'
           });
-          updated++;
-          return;
+          continue;
+        }
+
+        if (!['A', 'B', 'C', 'D'].includes(correctAns)) {
+          failed++;
+          errors.push({
+            row: rowNum,
+            question: qText,
+            code: 'INVALID_CORRECT_ANSWER',
+            message: `Đáp án đúng '${rawAns}' không hợp lệ. Phải là A, B, C hoặc D.`
+          });
+          continue;
         }
       }
 
-      // CREATE
-      appendObject(sheet, {
+      // 5. Points & Booleans
+      const normalPts = Number(r.normalPoints) > 0 ? Number(r.normalPoints) : 10;
+      const specialPts = Number(r.specialPoints) > 0 ? Number(r.specialPoints) : 20;
+      const isSpec = normalizeBoolean(r.isSpecial, false);
+      const isEnab = normalizeBoolean(r.enabled, true);
+
+      // 6. Duplicate check within bank
+      const normalizedQKey = qText.toLowerCase();
+      let matchedExisting = null;
+      if (r.id && existingIdMap.has(String(r.id))) {
+        matchedExisting = existingIdMap.get(String(r.id));
+      } else if (existingMap.has(normalizedQKey)) {
+        matchedExisting = existingMap.get(normalizedQKey);
+      }
+
+      if (matchedExisting) {
+        if (mode === 'SKIP') {
+          skipped++;
+          continue;
+        } else if (mode === 'UPDATE') {
+          const updateObj = {
+            bankId: bankId, // Server enforces bankId!
+            subject: sanitizeString(r.subject) || matchedExisting.data.subject || 'Tin học',
+            grade: r.grade ? Number(r.grade) : (matchedExisting.data.grade || 5),
+            topic: sanitizeString(r.topic) || matchedExisting.data.topic || '',
+            questionType: qType,
+            question: qText,
+            optionA: optA,
+            optionB: optB,
+            optionC: optC,
+            optionD: optD,
+            correctAnswer: correctAns,
+            explanation: sanitizeString(r.explanation || matchedExisting.data.explanation) || '',
+            difficulty: r.difficulty || matchedExisting.data.difficulty || 'MEDIUM',
+            normalPoints: normalPts,
+            specialPoints: specialPts,
+            isSpecial: isSpec,
+            enabled: isEnab,
+            tags: sanitizeString(r.tags || matchedExisting.data.tags) || '',
+            importId: importId || matchedExisting.data.importId || '',
+            updatedAt: now
+          };
+          updateObjectById(sheet, matchedExisting.data.id, updateObj);
+          updated++;
+          continue;
+        }
+        // mode === 'CREATE': fall through to create new row
+      }
+
+      // 7. Prepare new object to append
+      currentMaxOrder++;
+      const newQ = {
         id: generateId('q'),
-        bankId: bankId,
-        order: Number(r.order) || (sheet.getLastRow()),
+        bankId: bankId, // Server enforces bankId!
+        order: Number(r.order) > 0 ? Number(r.order) : currentMaxOrder,
         subject: sanitizeString(r.subject) || 'Tin học',
-        grade: Number(r.grade) || 5,
+        grade: r.grade ? Number(r.grade) : 5,
         topic: sanitizeString(r.topic) || '',
-        questionType: r.questionType || 'multiple_choice',
+        questionType: qType,
         question: qText,
-        optionA: sanitizeString(r.optionA || (r.options && r.options.A)),
-        optionB: sanitizeString(r.optionB || (r.options && r.options.B)),
-        optionC: sanitizeString(r.optionC || (r.options && r.options.C)),
-        optionD: sanitizeString(r.optionD || (r.options && r.options.D)),
-        correctAnswer: String(r.correctAnswer).trim().toUpperCase(),
-        explanation: sanitizeString(r.explanation),
+        optionA: optA,
+        optionB: optB,
+        optionC: optC,
+        optionD: optD,
+        correctAnswer: correctAns,
+        explanation: sanitizeString(r.explanation) || '',
         difficulty: r.difficulty || 'MEDIUM',
-        normalPoints: Number(r.normalPoints) || 10,
-        specialPoints: Number(r.specialPoints) || 20,
-        isSpecial: Boolean(r.isSpecial),
-        enabled: true,
-        tags: sanitizeString(r.tags)
-      });
+        normalPoints: normalPts,
+        specialPoints: specialPts,
+        isSpecial: isSpec,
+        enabled: isEnab,
+        tags: sanitizeString(r.tags) || '',
+        importId: importId,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      const rowValues = objectToRow(headers, newQ);
+      rowsToAppend.push(rowValues);
       created++;
-    } catch (err) {
+
+      // Cache locally to prevent duplicates within the same batch
+      existingMap.set(normalizedQKey, { data: newQ });
+      existingIdMap.set(newQ.id, { data: newQ });
+
+    } catch (rowErr) {
       failed++;
-      errors.push(`Dòng ${idx + 1}: ${err.message}`);
+      errors.push({
+        row: rowNum,
+        question: r.question || '',
+        code: 'ROW_PROCESSING_ERROR',
+        message: rowErr.message || 'Lỗi không xác định khi xử lý dòng.'
+      });
     }
-  });
+  }
 
-  // Ghi IMPORT_HISTORY
-  appendObject(historySheet, {
-    id: generateId('imp'),
-    importType: 'QUESTIONS',
-    fileName: data.fileName || 'web_import.json',
-    fileType: data.fileType || 'JSON',
-    targetBankId: bankId,
-    totalRows: rows.length,
-    createdRows: created,
-    updatedRows: updated,
-    skippedRows: skipped,
-    errorRows: failed,
-    mode: mode,
-    createdAt: getCurrentTimestamp()
-  });
+  // Batch append using setValues
+  if (rowsToAppend.length > 0) {
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, rowsToAppend.length, headers.length).setValues(rowsToAppend);
+  }
 
-  appendLog('INFO', 'IMPORT', 'questions.importBatch', `Import ${rows.length} câu hỏi: ${created} tạo, ${updated} sửa, ${skipped} bỏ qua, ${failed} lỗi.`, '', {
-    bankId: bankId,
-    created: created,
-    failed: failed
-  });
-
-  return successResponse({
+  return {
     total: rows.length,
     created: created,
     updated: updated,
     skipped: skipped,
     failed: failed,
     errors: errors
-  }, 'Xử lý import câu hỏi hoàn tất');
+  };
+}
+
+function saveImportedQuestionBank(payload) {
+  // 1. Validate payload
+  if (!payload || typeof payload !== 'object') {
+    return errorResponse('INVALID_PAYLOAD', 'Dữ liệu payload không hợp lệ.');
+  }
+
+  const bankData = payload.bank || {};
+  const rawQuestions = Array.isArray(payload.questions) ? payload.questions : [];
+  const importInfo = payload.import || {};
+  const importId = sanitizeString(importInfo.importId);
+  const mode = (importInfo.mode || 'CREATE').toUpperCase();
+
+  if (!bankData.name || !String(bankData.name).trim()) {
+    return errorResponse('MISSING_BANK_NAME', 'Tên bộ câu hỏi (bank.name) là bắt buộc.');
+  }
+
+  // 2. Pre-validate questions: ensure there is at least 1 valid question
+  const preValidatedErrors = [];
+  const validQuestions = [];
+
+  rawQuestions.forEach((r, idx) => {
+    const rowNum = idx + 1;
+    const qText = sanitizeString(r.question || r.q || r.content);
+    if (!qText) {
+      preValidatedErrors.push({
+        row: rowNum,
+        question: '',
+        code: 'MISSING_QUESTION',
+        message: 'Thiếu nội dung câu hỏi.'
+      });
+      return;
+    }
+
+    const qType = r.questionType || 'multiple_choice';
+    if (qType === 'multiple_choice') {
+      const optA = sanitizeString(r.optionA || (r.options && r.options.A) || (r.options && r.options[0]));
+      const optB = sanitizeString(r.optionB || (r.options && r.options.B) || (r.options && r.options[1]));
+      const rawAns = r.correctAnswer !== undefined ? r.correctAnswer : (r.answer !== undefined ? r.answer : '');
+      const correctAns = normalizeCorrectAnswer(rawAns);
+
+      if (!optA || !optB) {
+        preValidatedErrors.push({
+          row: rowNum,
+          question: qText,
+          code: 'MISSING_OPTIONS',
+          message: 'Phương án A và B là bắt buộc.'
+        });
+        return;
+      }
+
+      if (!['A', 'B', 'C', 'D'].includes(correctAns)) {
+        preValidatedErrors.push({
+          row: rowNum,
+          question: qText,
+          code: 'INVALID_CORRECT_ANSWER',
+          message: `Đáp án đúng '${rawAns}' không hợp lệ (cần là A, B, C, hoặc D).`
+        });
+        return;
+      }
+    }
+
+    validQuestions.push(r);
+  });
+
+  // Requirement 7: KHÔNG TẠO BANK RỖNG NGOÀI Ý MUỐN
+  if (validQuestions.length === 0) {
+    return {
+      success: false,
+      error: 'NO_VALID_QUESTIONS',
+      message: 'Không có câu hỏi hợp lệ nào trong danh sách để lưu vào ngân hàng.',
+      errors: preValidatedErrors
+    };
+  }
+
+  // Requirement 14: Check importId idempotency in IMPORT_HISTORY
+  const historySheet = getSheet('IMPORT_HISTORY');
+  if (importId) {
+    const existingImports = findRowsByField(historySheet, 'importId', importId);
+    const completedImport = existingImports.find(imp => imp.data.status === 'SUCCESS');
+    if (completedImport) {
+      return {
+        success: false,
+        error: 'DUPLICATE_IMPORT',
+        message: `Yêu cầu import với mã '${importId}' đã được xử lý thành công trước đó.`
+      };
+    }
+  }
+
+  // Requirement 17: LockService to prevent concurrent writes
+  const lock = LockService.getScriptLock();
+  let hasLock = false;
+  try {
+    hasLock = lock.tryLock(30000); // 30 seconds wait
+  } catch (lockErr) {
+    hasLock = false;
+  }
+
+  if (!hasLock) {
+    return errorResponse('CONCURRENT_IMPORT_IN_PROGRESS', 'Hệ thống đang xử lý một phiên import khác. Vui lòng thử lại sau giây lát.');
+  }
+
+  let createdBank = null;
+  const historyId = generateId('imp');
+  const startTime = getCurrentTimestamp();
+
+  try {
+    appendLog('INFO', 'IMPORT', 'QUESTIONS_IMPORT_STARTED', `Bắt đầu import bộ câu hỏi: '${bankData.name}' (${validQuestions.length} câu hợp lệ / ${rawQuestions.length} tổng)`, '', {
+      importId: importId,
+      totalRows: rawQuestions.length,
+      validRows: validQuestions.length
+    });
+
+    // 1. Create Question Bank
+    createdBank = createQuestionBank({
+      name: bankData.name,
+      subject: bankData.subject,
+      grade: bankData.grade,
+      topic: bankData.topic,
+      description: bankData.description,
+      sourceFileName: importInfo.fileName,
+      importId: importId
+    });
+
+    const bankId = createdBank.id;
+
+    // 2. Import Batch Questions (enforces question.bankId = bankId)
+    const batchResult = importQuestionsBatch(bankId, rawQuestions, {
+      mode: mode,
+      importId: importId,
+      sourceFileName: importInfo.fileName
+    });
+
+    // 3. Recalculate exact question count from QUESTIONS sheet
+    const actualQuestionCount = countQuestionsInBank(bankId);
+
+    // 4. Update Question Bank with actual count
+    const bankSheet = getSheet('QUESTION_BANKS');
+    updateObjectById(bankSheet, bankId, {
+      questionCount: actualQuestionCount,
+      updatedAt: getCurrentTimestamp()
+    });
+
+    // Requirement 23: If 0 questions saved successfully, disable bank
+    if (actualQuestionCount === 0) {
+      updateObjectById(bankSheet, bankId, {
+        enabled: false,
+        questionCount: 0,
+        updatedAt: getCurrentTimestamp()
+      });
+
+      appendObject(historySheet, {
+        id: historyId,
+        importId: importId,
+        importType: 'QUESTIONS',
+        fileName: importInfo.fileName || 'web_import.json',
+        fileType: importInfo.fileType || 'JSON',
+        targetBankId: bankId,
+        totalRows: rawQuestions.length,
+        createdRows: batchResult.created,
+        updatedRows: batchResult.updated,
+        skippedRows: batchResult.skipped,
+        errorRows: batchResult.failed,
+        mode: mode,
+        status: 'FAILED',
+        errorMessage: 'Không có câu hỏi nào được lưu thành công vào ngân hàng.',
+        createdAt: startTime,
+        completedAt: getCurrentTimestamp()
+      });
+
+      appendLog('ERROR', 'IMPORT', 'QUESTIONS_IMPORT_FAILED', `Import thất bại toàn bộ cho bank '${bankData.name}' (${bankId})`, '', batchResult);
+
+      return {
+        success: false,
+        error: 'IMPORT_FAILED',
+        message: 'Import thất bại: Không có câu hỏi nào được lưu thành công.',
+        bank: {
+          id: bankId,
+          bankCode: createdBank.bankCode,
+          name: createdBank.name,
+          questionCount: 0
+        },
+        importResult: batchResult
+      };
+    }
+
+    // Determine import status: SUCCESS or PARTIAL
+    const isPartial = batchResult.failed > 0;
+    const importStatus = isPartial ? 'PARTIAL' : 'SUCCESS';
+
+    // Record IMPORT_HISTORY
+    appendObject(historySheet, {
+      id: historyId,
+      importId: importId,
+      importType: 'QUESTIONS',
+      fileName: importInfo.fileName || 'web_import.json',
+      fileType: importInfo.fileType || 'JSON',
+      targetBankId: bankId,
+      totalRows: rawQuestions.length,
+      createdRows: batchResult.created,
+      updatedRows: batchResult.updated,
+      skippedRows: batchResult.skipped,
+      errorRows: batchResult.failed,
+      mode: mode,
+      status: importStatus,
+      errorMessage: isPartial ? `Có ${batchResult.failed} câu lỗi.` : '',
+      createdAt: startTime,
+      completedAt: getCurrentTimestamp()
+    });
+
+    appendLog(isPartial ? 'WARNING' : 'INFO', 'IMPORT', isPartial ? 'QUESTIONS_IMPORT_PARTIAL' : 'QUESTIONS_IMPORT_SUCCESS',
+      `Import ${importStatus}: Đã lưu ${actualQuestionCount} câu hỏi vào ngân hàng '${createdBank.name}' (${bankId}).`, '', {
+        bankId: bankId,
+        actualCount: actualQuestionCount,
+        batchResult: batchResult
+      }
+    );
+
+    const response = {
+      success: true,
+      bank: {
+        id: bankId,
+        bankCode: createdBank.bankCode,
+        name: createdBank.name,
+        questionCount: actualQuestionCount
+      },
+      importResult: {
+        total: rawQuestions.length,
+        created: batchResult.created,
+        updated: batchResult.updated,
+        skipped: batchResult.skipped,
+        failed: batchResult.failed,
+        ...(batchResult.errors && batchResult.errors.length > 0 ? { errors: batchResult.errors } : {})
+      }
+    };
+
+    if (isPartial) {
+      response.partial = true;
+    }
+
+    return response;
+
+  } catch (err) {
+    appendLog('ERROR', 'IMPORT', 'QUESTIONS_IMPORT_FAILED', `Lỗi nghiêm trọng khi import câu hỏi: ${err.message}`, '', err.stack);
+    if (createdBank && createdBank.id) {
+      try {
+        const bankSheet = getSheet('QUESTION_BANKS');
+        updateObjectById(bankSheet, createdBank.id, {
+          enabled: false,
+          questionCount: 0,
+          updatedAt: getCurrentTimestamp()
+        });
+      } catch (e) {}
+    }
+    return errorResponse('SAVE_IMPORT_ERROR', `Lỗi khi lưu ngân hàng câu hỏi: ${err.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function apiImportQuestionsBatch(data) {
+  requireFields(data, ['bankId', 'rows']);
+  const result = importQuestionsBatch(data.bankId, data.rows, {
+    mode: data.mode || 'CREATE',
+    importId: data.importId,
+    sourceFileName: data.fileName || data.sourceFileName
+  });
+  return successResponse(result, 'Xử lý import câu hỏi hoàn tất');
 }
 
 function apiImportTeamsBatch(data) {
@@ -2574,17 +3182,17 @@ function seedQuestionBanks(ss) {
     topic: 'Tổng hợp kiến thức Tin học Tiểu học',
     description: 'Bộ 15 câu hỏi trắc nghiệm Tin học 5 bao gồm máy tính, thư mục, Scratch, Internet an toàn và thông tin cá nhân.',
     questionCount: 15,
-    enabled: true
+    enabled: true,
+    importId: '',
+    sourceFileName: 'seed_tinhoc5.json',
+    createdAt: getCurrentTimestamp(),
+    updatedAt: getCurrentTimestamp()
   };
 
   const existingIds = getExistingColumnValues(sheet, 1);
   if (!existingIds.includes(defaultBank.id)) {
-    const row = [
-      defaultBank.id, defaultBank.bankCode, defaultBank.name, defaultBank.subject,
-      defaultBank.grade, defaultBank.topic, defaultBank.description,
-      defaultBank.questionCount, defaultBank.enabled,
-      getCurrentTimestamp(), getCurrentTimestamp()
-    ];
+    const headers = getHeaders(sheet);
+    const row = objectToRow(headers, defaultBank);
     sheet.appendRow(row);
   }
 }
@@ -2834,35 +3442,40 @@ function seedQuestions(ss) {
     });
   }
 
+  const headers = getHeaders(sheet);
   const toAdd = questionsList
     .filter(q => !existingOrders.includes(q.order))
-    .map(q => [
-      generateId('q'),
-      bankId,
-      q.order,
-      'Tin học',
-      5,
-      q.topic,
-      q.questionType,
-      q.question,
-      q.optionA,
-      q.optionB,
-      q.optionC,
-      q.optionD,
-      q.correctAnswer,
-      q.explanation,
-      q.difficulty,
-      10, // normalPoints
-      20, // specialPoints
-      q.isSpecial,
-      true, // enabled
-      q.tags,
-      getCurrentTimestamp(),
-      getCurrentTimestamp()
-    ]);
+    .map(q => {
+      const qObj = {
+        id: generateId('q'),
+        bankId: bankId,
+        order: q.order,
+        subject: 'Tin học',
+        grade: 5,
+        topic: q.topic,
+        questionType: q.questionType,
+        question: q.question,
+        optionA: q.optionA,
+        optionB: q.optionB,
+        optionC: q.optionC,
+        optionD: q.optionD,
+        correctAnswer: q.correctAnswer,
+        explanation: q.explanation,
+        difficulty: q.difficulty,
+        normalPoints: 10,
+        specialPoints: 20,
+        isSpecial: q.isSpecial,
+        enabled: true,
+        tags: q.tags,
+        importId: '',
+        createdAt: getCurrentTimestamp(),
+        updatedAt: getCurrentTimestamp()
+      };
+      return objectToRow(headers, qObj);
+    });
 
   if (toAdd.length > 0) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, toAdd.length, toAdd[0].length).setValues(toAdd);
+    sheet.getRange(sheet.getLastRow() + 1, 1, toAdd.length, headers.length).setValues(toAdd);
   }
 }
 
@@ -2881,9 +3494,10 @@ function ensureDataValidation(ss) {
     setListValidation(ss, 'LUCKY_WHEEL_HISTORY', 'D', ['TEAM', 'QUESTION', 'REWARD', 'CHALLENGE', 'POINTS']);
     setListValidation(ss, 'RANDOM_TEAM_HISTORY', 'D', ['TEAM', 'QUESTION', 'CHALLENGE', 'REWARD']);
 
-    setListValidation(ss, 'IMPORT_HISTORY', 'B', ['QUESTIONS', 'TEAMS']);
-    setListValidation(ss, 'IMPORT_HISTORY', 'D', ['CSV', 'XLSX', 'XLS']);
-    setListValidation(ss, 'IMPORT_HISTORY', 'K', ['CREATE', 'SKIP', 'UPDATE']);
+    setListValidation(ss, 'IMPORT_HISTORY', 'C', ['QUESTIONS', 'TEAMS']);
+    setListValidation(ss, 'IMPORT_HISTORY', 'E', ['CSV', 'XLSX', 'XLS', 'JSON']);
+    setListValidation(ss, 'IMPORT_HISTORY', 'L', ['CREATE', 'SKIP', 'UPDATE']);
+    setListValidation(ss, 'IMPORT_HISTORY', 'M', ['PROCESSING', 'SUCCESS', 'PARTIAL', 'FAILED']);
 
     setListValidation(ss, 'APP_LOGS', 'B', ['INFO', 'WARNING', 'ERROR']);
   } catch (e) {
@@ -2907,6 +3521,268 @@ function setBooleanValidation(ss, sheetName, columnLetters) {
   });
 }
 
+// ==========================================
+// 25. REPAIR, AUDIT & TEST UTILITIES
+// ==========================================
+
+function repairQuestionBankCounts() {
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const questionSheet = getSheet('QUESTIONS');
+  const lastBankRow = bankSheet.getLastRow();
+  if (lastBankRow <= 1) return { updated: 0, banks: [] };
+
+  const bankHeaders = getHeaders(bankSheet);
+  const bankIdCol = bankHeaders.indexOf('id');
+  const countCol = bankHeaders.indexOf('questionCount');
+  const updatedAtCol = bankHeaders.indexOf('updatedAt');
+
+  if (bankIdCol === -1 || countCol === -1) return { updated: 0, banks: [] };
+
+  // Calculate actual counts from QUESTIONS
+  const questionHeaders = getHeaders(questionSheet);
+  const qBankIdCol = questionHeaders.indexOf('bankId');
+  const qEnabledCol = questionHeaders.indexOf('enabled');
+  const lastQRow = questionSheet.getLastRow();
+  const countsMap = {};
+
+  if (lastQRow > 1 && qBankIdCol !== -1) {
+    const qData = questionSheet.getRange(2, 1, lastQRow - 1, questionHeaders.length).getValues();
+    for (let i = 0; i < qData.length; i++) {
+      const bId = String(qData[i][qBankIdCol]);
+      const enabled = qEnabledCol !== -1 ? normalizeBoolean(qData[i][qEnabledCol], true) : true;
+      if (bId && enabled) {
+        countsMap[bId] = (countsMap[bId] || 0) + 1;
+      }
+    }
+  }
+
+  const bankData = bankSheet.getRange(2, 1, lastBankRow - 1, bankHeaders.length).getValues();
+  let updatedCount = 0;
+  const updatedBanks = [];
+
+  for (let i = 0; i < bankData.length; i++) {
+    const bId = String(bankData[i][bankIdCol]);
+    const actualCount = countsMap[bId] || 0;
+    const currentCount = Number(bankData[i][countCol]) || 0;
+
+    if (actualCount !== currentCount) {
+      bankSheet.getRange(i + 2, countCol + 1).setValue(actualCount);
+      if (updatedAtCol !== -1) {
+        bankSheet.getRange(i + 2, updatedAtCol + 1).setValue(getCurrentTimestamp());
+      }
+      updatedCount++;
+      updatedBanks.push({ bankId: bId, oldCount: currentCount, newCount: actualCount });
+    }
+  }
+
+  appendLog('INFO', 'MAINTENANCE', 'repairQuestionBankCounts', `Đã đồng bộ lại số lượng câu hỏi cho ${updatedCount} ngân hàng câu hỏi.`, '', updatedBanks);
+
+  try {
+    SpreadsheetApp.getUi().alert('ĐỒNG BỘ SỐ LƯỢNG CÂU HỎI', `Đã kiểm tra và đồng bộ lại cho ${updatedCount} ngân hàng câu hỏi.`, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+
+  return { updated: updatedCount, banks: updatedBanks };
+}
+
+function apiRepairQuestionBankCounts() {
+  const result = repairQuestionBankCounts();
+  return successResponse(result, 'Đã đồng bộ lại số lượng câu hỏi thành công');
+}
+
+function findOrphanQuestions() {
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const questionSheet = getSheet('QUESTIONS');
+  const lastQRow = questionSheet.getLastRow();
+  if (lastQRow <= 1) return { orphanCount: 0, orphans: [] };
+
+  const bankHeaders = getHeaders(bankSheet);
+  const bankIdCol = bankHeaders.indexOf('id');
+  const validBankIds = new Set();
+  if (bankSheet.getLastRow() > 1 && bankIdCol !== -1) {
+    const bData = bankSheet.getRange(2, bankIdCol + 1, bankSheet.getLastRow() - 1, 1).getValues();
+    bData.forEach(r => {
+      if (r[0]) validBankIds.add(String(r[0]));
+    });
+  }
+
+  const qHeaders = getHeaders(questionSheet);
+  const qIdCol = qHeaders.indexOf('id');
+  const qBankIdCol = qHeaders.indexOf('bankId');
+  const qTextCol = qHeaders.indexOf('question');
+  const qData = questionSheet.getRange(2, 1, lastQRow - 1, qHeaders.length).getValues();
+
+  const orphans = [];
+  for (let i = 0; i < qData.length; i++) {
+    const qId = qData[i][qIdCol];
+    const bId = String(qData[i][qBankIdCol] || '').trim();
+    const qText = qData[i][qTextCol];
+
+    if (!bId || !validBankIds.has(bId)) {
+      orphans.push({
+        rowIndex: i + 2,
+        questionId: qId,
+        invalidBankId: bId,
+        question: qText
+      });
+    }
+  }
+
+  if (orphans.length > 0) {
+    appendLog('WARNING', 'AUDIT', 'findOrphanQuestions', `Phát hiện ${orphans.length} câu hỏi không có ngân hàng hợp lệ (Orphan Questions).`, '', orphans);
+  }
+
+  return { orphanCount: orphans.length, orphans: orphans };
+}
+
+function apiFindOrphans() {
+  const result = findOrphanQuestions();
+  return successResponse(result);
+}
+
+function testQuestionBankPersistence() {
+  const ts = new Date().getTime();
+  const testBankName = `[TEST] Bộ câu hỏi Kiểm tra ${ts}`;
+  const testPayload = {
+    bank: {
+      name: testBankName,
+      subject: 'Tin học',
+      grade: 5,
+      topic: 'Kiểm thử Database',
+      description: 'Ngân hàng câu hỏi dùng để kiểm tra tính toàn vẹn và độ bền của cơ sở dữ liệu.'
+    },
+    questions: [
+      {
+        order: 1,
+        question: 'Câu test 1: Bàn phím máy tính là thiết bị gì?',
+        optionA: 'Thiết bị vào',
+        optionB: 'Thiết bị ra',
+        optionC: 'Thiết bị lưu trữ',
+        optionD: 'Không có loại này',
+        correctAnswer: 'A',
+        explanation: 'Bàn phím đưa dữ liệu vào máy.',
+        difficulty: 'EASY',
+        normalPoints: 10,
+        specialPoints: 20
+      },
+      {
+        order: 2,
+        question: 'Câu test 2: Màn hình máy tính là thiết bị gì?',
+        optionA: 'Thiết bị vào',
+        optionB: 'Thiết bị ra',
+        optionC: 'Bộ xử lý',
+        optionD: 'Dây cáp',
+        correctAnswer: 'B',
+        explanation: 'Màn hình hiển thị dữ liệu ra ngoài.',
+        difficulty: 'EASY',
+        normalPoints: 10,
+        specialPoints: 20
+      },
+      {
+        order: 3,
+        question: 'Câu test 3: Scratch dùng khối lệnh gì để lặp lại mãi mãi?',
+        optionA: 'Repeat',
+        optionB: 'Forever',
+        optionC: 'If then',
+        optionD: 'Wait',
+        correctAnswer: 'B',
+        explanation: 'Khối Forever là vòng lặp vô hạn.',
+        difficulty: 'HARD',
+        isSpecial: true,
+        normalPoints: 10,
+        specialPoints: 20
+      }
+    ],
+    import: {
+      importId: `test_imp_${ts}`,
+      fileName: 'test_questions.json',
+      fileType: 'JSON',
+      mode: 'CREATE'
+    }
+  };
+
+  Logger.log('🧪 Bắt đầu testQuestionBankPersistence...');
+  const result = saveImportedQuestionBank(testPayload);
+  Logger.log('Kết quả saveImportedQuestionBank: ' + JSON.stringify(result));
+
+  if (!result || !result.success) {
+    const errMsg = `❌ Test thất bại ngay bước saveImportedQuestionBank: ${JSON.stringify(result)}`;
+    Logger.log(errMsg);
+    appendLog('ERROR', 'TEST', 'testQuestionBankPersistence', errMsg, '', result);
+    try {
+      SpreadsheetApp.getUi().alert('TEST THẤT BẠI', errMsg, SpreadsheetApp.getUi().ButtonSet.OK);
+    } catch (e) {}
+    return { success: false, error: errMsg };
+  }
+
+  const bankId = result.bank.id;
+
+  // Query lại bank
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const foundBank = findRowById(bankSheet, bankId);
+  if (!foundBank) {
+    const errMsg = `❌ Test thất bại: Không tìm thấy Bank ID ${bankId} trong QUESTION_BANKS sau khi lưu.`;
+    Logger.log(errMsg);
+    try {
+      SpreadsheetApp.getUi().alert('TEST THẤT BẠI', errMsg, SpreadsheetApp.getUi().ButtonSet.OK);
+    } catch (e) {}
+    return { success: false, error: errMsg };
+  }
+
+  // Query lại questions
+  const questions = listQuestionsByBank(bankId);
+  Logger.log(`Đã nạp lại ${questions.length} câu hỏi cho bank ${bankId}`);
+
+  // Kiểm tra questionCount = 3
+  const countMatch = Number(foundBank.data.questionCount) === 3 && questions.length === 3;
+  if (!countMatch) {
+    const errMsg = `❌ Test thất bại: questionCount không khớp! Bank count=${foundBank.data.questionCount}, Questions found=${questions.length}, Kỳ vọng=3`;
+    Logger.log(errMsg);
+    try {
+      SpreadsheetApp.getUi().alert('TEST THẤT BẠI', errMsg, SpreadsheetApp.getUi().ButtonSet.OK);
+    } catch (e) {}
+    return { success: false, error: errMsg };
+  }
+
+  // Kiểm tra tất cả bankId giống nhau
+  const allBankIdsMatch = questions.every(q => String(q.bankId) === String(bankId));
+  if (!allBankIdsMatch) {
+    const errMsg = '❌ Test thất bại: Phát hiện câu hỏi có bankId không khớp với Bank vừa tạo!';
+    Logger.log(errMsg);
+    try {
+      SpreadsheetApp.getUi().alert('TEST THẤT BẠI', errMsg, SpreadsheetApp.getUi().ButtonSet.OK);
+    } catch (e) {}
+    return { success: false, error: errMsg };
+  }
+
+  const successMsg = `✅ TEST THÀNH CÔNG RỰC RỠ!\n` +
+    `• Đã tạo Bank: ${foundBank.data.name} (Mã: ${bankId})\n` +
+    `• Đã lưu và xác minh: 3 câu hỏi tồn tại trong QUESTIONS sheet\n` +
+    `• Tất cả 3 câu hỏi đều trỏ chuẩn xác về bankId=${bankId}\n` +
+    `• QUESTION_BANKS.questionCount = 3\n` +
+    `• IMPORT_HISTORY đã ghi nhận importId=${testPayload.import.importId} (SUCCESS)`;
+
+  Logger.log(successMsg);
+  appendLog('INFO', 'TEST', 'testQuestionBankPersistence', 'Test kiểm tra độ bền dữ liệu Question Bank thành công!', '', {
+    bankId: bankId,
+    questionsCount: questions.length
+  });
+
+  try {
+    SpreadsheetApp.getUi().alert('🧪 KẾT QUẢ KIỂM THỬ ĐỘ BỀN', successMsg, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+
+  return {
+    success: true,
+    bankId: bankId,
+    message: successMsg
+  };
+}
+
+function apiTestQuestionBankPersistence() {
+  const result = testQuestionBankPersistence();
+  return successResponse(result, 'Chạy test persistence hoàn tất');
+}
+
 function showDatabaseSummary() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let summary = '📊 TỔNG QUAN HỆ THỐNG EDUPLAY (THEO ĐỘI):\n\n';
@@ -2916,6 +3792,7 @@ function showDatabaseSummary() {
     { label: 'Lớp học (Classes)', sheet: 'CLASSES' },
     { label: 'Ngân hàng câu hỏi (Banks)', sheet: 'QUESTION_BANKS' },
     { label: 'Câu hỏi (Questions)', sheet: 'QUESTIONS' },
+    { label: 'Lịch sử Import dữ liệu', sheet: 'IMPORT_HISTORY' },
     { label: 'Phiên chơi (Game Sessions)', sheet: 'GAME_SESSIONS' },
     { label: 'Đội thi đấu (Teams)', sheet: 'TEAMS' },
     { label: 'Sự kiện điểm (Score Events)', sheet: 'SCORE_EVENTS' },
@@ -2927,7 +3804,6 @@ function showDatabaseSummary() {
     { label: 'Lịch sử Bốc thăm (Random Team)', sheet: 'RANDOM_TEAM_HISTORY' },
     { label: 'Kết quả Team Challenge', sheet: 'TEAM_CHALLENGE_RESULTS' },
     { label: 'Giấy chứng nhận (Certificates)', sheet: 'CERTIFICATES' },
-    { label: 'Lịch sử Import dữ liệu', sheet: 'IMPORT_HISTORY' },
     { label: 'Nhật ký ứng dụng (App Logs)', sheet: 'APP_LOGS' }
   ];
 
@@ -2936,6 +3812,27 @@ function showDatabaseSummary() {
     const count = sheet ? Math.max(0, sheet.getLastRow() - 1) : 'Chưa tạo';
     summary += `• ${m.label.padEnd(30, ' ')}: ${count} bản ghi\n`;
   });
+
+  // Check banks with 0 questions
+  try {
+    const bankSheet = ss.getSheetByName('QUESTION_BANKS');
+    if (bankSheet && bankSheet.getLastRow() > 1) {
+      const headers = getHeaders(bankSheet);
+      const countCol = headers.indexOf('questionCount');
+      const enabledCol = headers.indexOf('enabled');
+      if (countCol !== -1) {
+        const data = bankSheet.getRange(2, 1, bankSheet.getLastRow() - 1, headers.length).getValues();
+        let zeroCount = 0;
+        data.forEach(r => {
+          const isEnabled = enabledCol !== -1 ? normalizeBoolean(r[enabledCol], true) : true;
+          if (isEnabled && (Number(r[countCol]) === 0 || !r[countCol])) {
+            zeroCount++;
+          }
+        });
+        summary += `\n⚠️ Ngân hàng có 0 câu hỏi: ${zeroCount}\n`;
+      }
+    }
+  } catch (e) {}
 
   summary += '\n* Chế độ: Quản lý Đội độc lập (2-4 Đội), bảo vệ tính riêng tư học sinh.';
 

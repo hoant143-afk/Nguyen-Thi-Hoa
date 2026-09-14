@@ -15,9 +15,13 @@ import {
   Trash2,
   ChevronDown,
   Layers,
+  Save,
+  Check,
+  RotateCcw,
+  Sparkles,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Question } from '../../types';
+import { Question, GradeLevel, QuestionBankLesson } from '../../types';
 import { parseCsv } from '../../services/importer/csvParser';
 import { extractSheetData, readExcelWorkbook } from '../../services/importer/excelParser';
 import {
@@ -36,11 +40,12 @@ import {
   ValidatedQuestionRow,
 } from '../../services/importer/types';
 import { soundService } from '../../services/soundService';
-import { EduplayStorage } from '../../services/eduplayStorage';
-import { QuestionsRepository } from '../../repositories/questionsRepository';
-import { apiClient } from '../../services/apiClient';
-import { QuestionBankRepository } from '../../repositories/questionBankRepository';
-import { GradeLevel, QuestionBankLesson } from '../../types';
+import {
+  saveImportedQuestionBank,
+  SaveImportSummary,
+} from '../../services/importer/importOrchestrator';
+
+export type ImportStage = 'IDLE' | 'PARSING' | 'FILE_PARSED' | 'SAVING' | 'DATA_SAVED' | 'ERROR';
 
 interface QuestionImportModalProps {
   isOpen: boolean;
@@ -51,6 +56,7 @@ interface QuestionImportModalProps {
   initialLessonTitle?: string;
   initialGrade?: GradeLevel;
   initialSubject?: string;
+  initialTopic?: string;
   targetLessonId?: string;
   saveAsLesson?: boolean;
 }
@@ -64,18 +70,27 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
   initialLessonTitle = '',
   initialGrade = 5,
   initialSubject = 'Tin học',
+  initialTopic = '',
   targetLessonId,
-  saveAsLesson = true,
 }) => {
+  // Stage separation: FILE_PARSED vs DATA_SAVED (Requirement A)
+  const [importStage, setImportStage] = useState<ImportStage>('IDLE');
+  const [saveSummary, setSaveSummary] = useState<SaveImportSummary | null>(null);
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+
   const [file, setFile] = useState<File | null>(null);
   const [fileInfo, setFileInfo] = useState<{ name: string; size: string; type: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Lesson metadata for Question Bank storage
-  const [saveToBank, setSaveToBank] = useState<boolean>(saveAsLesson);
-  const [lessonTitle, setLessonTitle] = useState<string>(initialLessonTitle);
-  const [lessonGrade, setLessonGrade] = useState<GradeLevel>(initialGrade);
-  const [lessonSubject, setLessonSubject] = useState<string>(initialSubject);
+  // Form Fields before Save (Requirement M)
+  const [bankName, setBankName] = useState<string>(initialLessonTitle);
+  const [bankGrade, setBankGrade] = useState<GradeLevel>(initialGrade);
+  const [bankSubject, setBankSubject] = useState<string>(initialSubject);
+  const [bankTopic, setBankTopic] = useState<string>(initialTopic);
+  const [bankDescription, setBankDescription] = useState<string>('');
+  const [nameTouched, setNameTouched] = useState<boolean>(false);
+  const [showErrorsList, setShowErrorsList] = useState<boolean>(false);
+  const importIdRef = useRef<string | null>(null);
 
   // Workbook / sheets state
   const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
@@ -96,21 +111,18 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<ImportHistoryEntry[]>([]);
 
-  // Loading indicator
-  const [isProcessing, setIsProcessing] = useState(false);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
-  // Format file size nicely
+  // Format file size
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
-  // Reset current upload
+  // Reset upload state
   const handleResetFile = () => {
     setFile(null);
     setFileInfo(null);
@@ -120,13 +132,21 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
     setRawHeaders([]);
     setRawRows([]);
     setColumnMapping({});
+    setImportStage('IDLE');
+    setSaveSummary(null);
+    setSaveErrorMessage(null);
+    setNameTouched(false);
+    setShowErrorsList(false);
+    importIdRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Read file handler
+  // Read file handler (Stage: PARSING -> FILE_PARSED)
   const processUploadedFile = async (selectedFile: File) => {
     try {
-      setIsProcessing(true);
+      setImportStage('PARSING');
+      setSaveErrorMessage(null);
+      setSaveSummary(null);
       soundService.playClick();
       setFile(selectedFile);
 
@@ -136,7 +156,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
 
       if (!isCsv && !isXlsx && !isXls) {
         alert('Vui lòng chọn tệp định dạng .csv, .xlsx hoặc .xls');
-        setIsProcessing(false);
+        setImportStage('IDLE');
         return;
       }
 
@@ -146,31 +166,33 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
         type: isCsv ? 'CSV' : isXlsx ? 'Excel (.xlsx)' : 'Excel (.xls)',
       });
 
-      // Auto-detect lesson title, grade, subject from file name if not already set
+      // Auto-detect bank name, grade, subject from file name if empty
       const cleanBaseName = selectedFile.name
         .replace(/\.[^/.]+$/, '')
         .replace(/[-_]+/g, ' ')
         .trim();
-      if (!lessonTitle) {
-        setLessonTitle(cleanBaseName);
+
+      if (!bankName) {
+        setBankName(cleanBaseName);
       }
+
       const gradeMatch = cleanBaseName.match(/(?:khoi|khối|lop|lớp|k)\s*([1-9])/i);
       if (gradeMatch) {
         const detectedGrade = parseInt(gradeMatch[1], 10) as GradeLevel;
         if (detectedGrade >= 1 && detectedGrade <= 9) {
-          setLessonGrade(detectedGrade);
+          setBankGrade(detectedGrade);
         }
       }
+
       const lowerBase = cleanBaseName.toLowerCase();
-      if (lowerBase.includes('toán') || lowerBase.includes('toan')) setLessonSubject('Toán');
-      else if (lowerBase.includes('tiếng việt') || lowerBase.includes('tieng viet')) setLessonSubject('Tiếng Việt');
-      else if (lowerBase.includes('tiếng anh') || lowerBase.includes('tieng anh') || lowerBase.includes('english')) setLessonSubject('Tiếng Anh');
-      else if (lowerBase.includes('khoa học') || lowerBase.includes('khoa hoc')) setLessonSubject('Khoa học');
-      else if (lowerBase.includes('lịch sử') || lowerBase.includes('địa lý') || lowerBase.includes('dia ly')) setLessonSubject('Lịch sử & Địa lý');
-      else if (lowerBase.includes('tin học') || lowerBase.includes('tin hoc')) setLessonSubject('Tin học');
+      if (lowerBase.includes('toán') || lowerBase.includes('toan')) setBankSubject('Toán');
+      else if (lowerBase.includes('tiếng việt') || lowerBase.includes('tieng viet')) setBankSubject('Tiếng Việt');
+      else if (lowerBase.includes('tiếng anh') || lowerBase.includes('tieng anh') || lowerBase.includes('english')) setBankSubject('Tiếng Anh');
+      else if (lowerBase.includes('khoa học') || lowerBase.includes('khoa hoc')) setBankSubject('Khoa học');
+      else if (lowerBase.includes('lịch sử') || lowerBase.includes('địa lý') || lowerBase.includes('dia ly')) setBankSubject('Lịch sử & Địa lý');
+      else if (lowerBase.includes('tin học') || lowerBase.includes('tin hoc')) setBankSubject('Tin học');
 
       if (isCsv) {
-        // Parse CSV UTF-8
         const text = await selectedFile.text();
         const parsed = parseCsv(text);
         setRawHeaders(parsed.headers);
@@ -178,7 +200,6 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
         const autoMap = autoDetectColumnMapping(parsed.headers);
         setColumnMapping(autoMap);
       } else {
-        // Read Excel
         const arrayBuffer = await selectedFile.arrayBuffer();
         const wbInfo = readExcelWorkbook(arrayBuffer);
         setWorkbook(wbInfo.workbook);
@@ -194,12 +215,14 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
           setColumnMapping(autoMap);
         }
       }
+
+      // Transition to FILE_PARSED (File parsed successfully, waiting for user confirmation before saving)
+      setImportStage('FILE_PARSED');
     } catch (err: any) {
       console.error('Lỗi khi đọc tệp:', err);
-      alert(`Không thể đọc tệp: ${err.message || 'Tệp bị lỗi hoặc không đúng định dạng.'}`);
+      setImportStage('ERROR');
+      setSaveErrorMessage(`Không thể đọc tệp: ${err.message || 'Tệp bị lỗi hoặc không đúng định dạng.'}`);
       handleResetFile();
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -261,134 +284,114 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
     return validatedRows;
   }, [validatedRows, filterView]);
 
-  // Execute Import
-  const handleConfirmImport = async () => {
-    // Filter rows that can be imported
-    const rowsToImport = validatedRows.filter((r) => {
+  // Validation before saving (Requirement M)
+  const isNameValid = bankName.trim().length > 0;
+  const rowsToSave = useMemo(() => {
+    return validatedRows.filter((r) => {
       if (r.status === 'ERROR' || !r.parsedQuestion) return false;
-      if (r.isDuplicate && importMode === 'APPEND') return false; // skip duplicates in append mode
+      if (r.isDuplicate && importMode === 'APPEND') return false;
       return true;
     });
+  }, [validatedRows, importMode]);
 
-    if (rowsToImport.length === 0) {
-      alert('Không có câu hỏi hợp lệ nào để nhập.');
+  const canSave = isNameValid && rowsToSave.length > 0 && importStage !== 'SAVING';
+
+  // ORCHESTRATION EXECUTION: saveImportedQuestionBank (Requirement B & L)
+  const handleSaveQuestionBank = async () => {
+    setNameTouched(true);
+    if (!isNameValid) {
+      soundService.playWrong();
+      setSaveErrorMessage('⚠️ Vui lòng nhập tên bộ câu hỏi.');
+      return;
+    }
+
+    if (rowsToSave.length === 0) {
+      soundService.playWrong();
+      setSaveErrorMessage('Không có câu hỏi hợp lệ nào để lưu.');
       return;
     }
 
     soundService.playClick();
-    setIsProcessing(true);
+    setImportStage('SAVING');
+    setSaveErrorMessage(null);
+
+    // Requirement 10: Giữ cùng importId trong toàn bộ lần retry của cùng 1 lần import
+    if (!importIdRef.current) {
+      importIdRef.current = `import_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    }
 
     try {
-      let finalQuestionsList: Question[] = [];
-
-      const toQuestion = (pq: NonNullable<ValidatedQuestionRow['parsedQuestion']>, fallbackId: number): Question => ({
-        id: pq.id || fallbackId,
-        question: pq.question,
-        options: [...pq.options],
-        correctAnswer: pq.correctAnswer,
-        category: pq.category || 'Tin học 5',
-        explanation: pq.explanation || '',
-        subject: pq.subject,
-        grade: pq.grade,
-        topic: pq.topic,
-        questionType: pq.questionType,
-        difficulty: pq.difficulty || 'MEDIUM',
-        normalPoints: pq.normalPoints ?? 10,
-        stealPoints: pq.stealPoints ?? 5,
-        specialPoints: pq.specialPoints ?? 20,
-        isSpecial: pq.isSpecial ?? false,
-        enabled: pq.enabled ?? true,
-      });
-
-      if (importMode === 'REPLACE_ALL') {
-        finalQuestionsList = rowsToImport.map((r, idx) => toQuestion(r.parsedQuestion!, idx + 1));
-      } else if (importMode === 'UPDATE_DUPLICATE') {
-        const workingMap = new Map<string, Question>();
-        // Add existing questions
-        currentQuestions.forEach((q) => {
-          workingMap.set(q.question.trim().toLowerCase(), q);
-        });
-
-        // Upsert new/updated questions
-        rowsToImport.forEach((r, idx) => {
-          const qObj = r.parsedQuestion!;
-          const key = qObj.question.trim().toLowerCase();
-          const existing = workingMap.get(key);
-          if (existing) {
-            workingMap.set(key, {
-              ...existing,
-              ...toQuestion(qObj, existing.id),
-              id: existing.id,
-            });
-          } else {
-            workingMap.set(key, toQuestion(qObj, Date.now() + idx));
-          }
-        });
-        finalQuestionsList = Array.from(workingMap.values());
-      } else {
-        // APPEND MODE: only add valid non-duplicate questions
-        const newItems: Question[] = rowsToImport.map((r, idx) =>
-          toQuestion(r.parsedQuestion!, Date.now() + idx)
-        );
-        finalQuestionsList = [...currentQuestions, ...newItems];
-      }
-
-      // Save as lesson in QuestionBankRepository if enabled
-      let createdLesson: QuestionBankLesson | null = null;
-      if (saveToBank) {
-        const id = targetLessonId || `lesson_${Date.now()}`;
-        const existingLesson = targetLessonId ? QuestionBankRepository.getLessonById(targetLessonId) : null;
-        createdLesson = {
-          id,
-          grade: lessonGrade,
-          subject: lessonSubject.trim() || 'Tin học',
-          lessonNumber: existingLesson?.lessonNumber || Date.now(),
-          lessonTitle: lessonTitle.trim() || fileInfo?.name.replace(/\.[^/.]+$/, '') || 'Bài học mới',
-          description: `Bộ câu hỏi nhập từ tệp ${fileInfo?.name || 'Excel/CSV'} (${finalQuestionsList.length} câu hỏi)`,
-          questions: finalQuestionsList,
-        };
-        QuestionBankRepository.saveLesson(createdLesson);
-        QuestionBankRepository.setSelectedLessonId(createdLesson.id);
-      }
-
-      // Save locally to EduplayStorage
-      EduplayStorage.saveQuestions(finalQuestionsList);
-
-      // If in cloud mode, sync questions to cloud bank
-      if (apiClient.getMode() === 'cloud') {
-        try {
-          for (const r of rowsToImport) {
-            if (r.parsedQuestion) {
-              const qConverted = toQuestion(r.parsedQuestion, Date.now());
-              await QuestionsRepository.createQuestion('bank_imported', qConverted);
-            }
-          }
-        } catch (cloudErr) {
-          console.warn('Lỗi khi đồng bộ cloud:', cloudErr);
+      // Execute 10-step persistence orchestration
+      const summary = await saveImportedQuestionBank(
+        {
+          name: bankName.trim(),
+          subject: bankSubject.trim() || 'Tin học',
+          grade: bankGrade,
+          topic: bankTopic.trim(),
+          description: bankDescription.trim() || `Bộ câu hỏi nhập từ tệp ${fileInfo?.name || 'Excel/CSV'}`,
+          bankId: targetLessonId,
+        },
+        rowsToSave.map((r) => r.parsedQuestion),
+        {
+          mode: importMode,
+          fileName: fileInfo?.name,
+          fileType: fileInfo?.type.includes('CSV') ? 'CSV' : 'XLSX',
+          clientImportId: importIdRef.current,
+          setActiveAsSelected: true,
         }
-      }
+      );
 
       // Log import history
       logImportHistory({
         fileName: fileInfo?.name || 'unknown_file',
         fileType: (fileInfo?.type?.includes('CSV') ? 'CSV' : 'XLSX') as any,
         target: 'QUESTIONS',
-        importedRows: rowsToImport.length,
-        skippedRows: stats.duplicates && importMode === 'APPEND' ? stats.duplicates : 0,
-        errorRows: stats.error,
+        importedRows: summary.createdCount + summary.updatedCount,
+        skippedRows: summary.skippedCount,
+        errorRows: summary.failedCount,
       });
 
-      if (createdLesson && onImportLessonSuccess) {
-        onImportLessonSuccess(createdLesson, finalQuestionsList);
+      if (summary.partial) {
+        soundService.playWrong();
+      } else {
+        soundService.playCorrect();
       }
-      onImportSuccess(finalQuestionsList);
-      onClose();
+
+      setSaveSummary(summary);
+      // ONLY SHOW SUCCESS AFTER REPOSITORY PERSISTENCE COMMIT (Requirement A)
+      setImportStage('DATA_SAVED');
     } catch (err: any) {
-      console.error('Lỗi lưu câu hỏi:', err);
-      alert(`Đã xảy ra lỗi khi lưu: ${err.message}`);
-    } finally {
-      setIsProcessing(false);
+      console.error('Lỗi khi lưu bộ câu hỏi:', err);
+      soundService.playWrong();
+      setImportStage('ERROR');
+
+      let userMsg = err.message || 'Lỗi không xác định khi commit dữ liệu.';
+      if (userMsg.includes('Failed to fetch') || userMsg.includes('NETWORK_ERROR') || userMsg.includes('NetworkError')) {
+        userMsg = 'Không thể kết nối máy chủ hoặc Google Apps Script (NETWORK_ERROR). Vui lòng kiểm tra đường truyền internet hoặc cài đặt URL Web App.';
+      } else if (userMsg.includes('API_TIMEOUT') || userMsg.includes('timeout')) {
+        userMsg = 'Thời gian phản hồi từ Google Apps Script quá lâu (API_TIMEOUT). Vui lòng thử bấm lưu lại.';
+      } else if (userMsg.includes('DUPLICATE_IMPORT')) {
+        userMsg = 'Giao dịch nhập câu hỏi này đã được xử lý trước đó (DUPLICATE_IMPORT).';
+      } else if (userMsg.includes('Chưa cấu hình Google Apps Script API URL')) {
+        userMsg = '⚠️ Chưa cấu hình Google Apps Script API URL. Vui lòng thiết lập URL Web App trong phần Cài đặt.';
+      }
+      setSaveErrorMessage(userMsg);
     }
+  };
+
+  // Complete and invoke callbacks
+  const handleFinishAndUse = () => {
+    if (!saveSummary) {
+      onClose();
+      return;
+    }
+
+    soundService.playClick();
+    if (onImportLessonSuccess) {
+      onImportLessonSuccess(saveSummary.lesson, saveSummary.savedQuestions);
+    }
+    onImportSuccess(saveSummary.savedQuestions);
+    onClose();
   };
 
   // Download Templates
@@ -414,20 +417,30 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
               <Upload className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div>
-              <h2 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
-                <span>Nhập Câu Hỏi Từ CSV / Excel</span>
-                <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 rounded-full font-bold">
-                  .CSV • .XLSX • .XLS
-                </span>
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-black text-white uppercase tracking-wider">
+                  Nhập & Lưu Ngân Hàng Câu Hỏi
+                </h2>
+                {importStage === 'FILE_PARSED' && (
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
+                    TỆP ĐÃ ĐỌC • CHỜ LƯU
+                  </span>
+                )}
+                {importStage === 'DATA_SAVED' && (
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                    <Check className="w-3 h-3 stroke-[3]" />
+                    ĐÃ COMMIT XÁC NHẬN
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-400">
-                Hỗ trợ tiếng Việt có dấu, tự nhận diện tiêu đề cột, preview & kiểm tra lỗi trước khi lưu
+                Pipeline chuẩn hóa: Đọc tệp → Preview kiểm tra → Khai báo thông tin → Lưu bền vững vào Repository
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Download Template dropdown/buttons */}
+            {/* Download Template buttons */}
             <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 p-1 rounded-xl">
               <span className="text-[11px] font-bold text-slate-400 pl-2 pr-1 flex items-center gap-1">
                 <Download className="w-3.5 h-3.5 text-cyan-400" />
@@ -437,7 +450,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                 type="button"
                 onClick={handleDownloadCsvTemplate}
                 className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg transition-all cursor-pointer"
-                title="Tải tệp mẫu định dạng CSV tiếng Việt có BOM"
+                title="Tải tệp mẫu định dạng CSV tiếng Việt"
               >
                 CSV
               </button>
@@ -445,7 +458,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                 type="button"
                 onClick={handleDownloadExcelTemplate}
                 className="px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-lg transition-all cursor-pointer"
-                title="Tải tệp mẫu định dạng Excel (.xlsx) 3 câu mẫu Tin học 5"
+                title="Tải tệp mẫu định dạng Excel (.xlsx)"
               >
                 Excel (.xlsx)
               </button>
@@ -465,7 +478,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
               <History className="w-4 h-4" />
             </button>
 
-            {/* Close Modal Button */}
+            {/* Close Button */}
             <button
               type="button"
               onClick={() => {
@@ -481,7 +494,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* History Sub-drawer */}
+          {/* History Drawer */}
           {showHistory && (
             <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 space-y-3 animate-in fade-in">
               <div className="flex items-center justify-between">
@@ -491,7 +504,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                 </h3>
                 <button
                   onClick={() => setShowHistory(false)}
-                  className="text-xs text-slate-500 hover:text-white"
+                  className="text-xs text-slate-500 hover:text-white cursor-pointer"
                 >
                   Đóng
                 </button>
@@ -527,8 +540,220 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
             </div>
           )}
 
-          {/* STEP 1: UPLOAD AREA / FILE INFO */}
-          {!file ? (
+          {/* ======================================================= */}
+          {/* STAGE A: DATA_SAVED CONFIRMATION SCREEN (Requirement 17 & 18) */}
+          {/* ======================================================= */}
+          {importStage === 'DATA_SAVED' && saveSummary && (
+            <div
+              className={`border rounded-3xl p-6 sm:p-8 space-y-6 animate-in zoom-in-95 duration-200 ${
+                saveSummary.partial
+                  ? 'bg-slate-950 border-amber-500/60 shadow-xl shadow-amber-950/20'
+                  : 'bg-slate-950 border-emerald-500/50 shadow-xl shadow-emerald-950/20'
+              }`}
+            >
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+                <div className="flex items-center gap-4">
+                  <div
+                    className={`w-14 h-14 rounded-2xl border flex items-center justify-center shadow-xl shrink-0 ${
+                      saveSummary.partial
+                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
+                        : 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                    }`}
+                  >
+                    {saveSummary.partial ? (
+                      <AlertCircle className="w-8 h-8 stroke-[2.5]" />
+                    ) : (
+                      <CheckCircle2 className="w-8 h-8 stroke-[2.5]" />
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white flex flex-wrap items-center gap-2">
+                      {saveSummary.partial ? (
+                        <>
+                          <span className="text-amber-400">⚠️ ĐÃ LƯU MỘT PHẦN</span>
+                          <span className="text-xs bg-amber-950 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full font-bold">
+                            {saveSummary.totalRows} câu: {saveSummary.createdCount + saveSummary.updatedCount} thành công, {saveSummary.failedCount} lỗi
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-emerald-400">🎉 LƯU THÀNH CÔNG</span>
+                          <span className="text-xs bg-emerald-950 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full font-bold">
+                            Đã lưu bền vững vào hệ thống
+                          </span>
+                        </>
+                      )}
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {saveSummary.partial
+                        ? 'Một số dòng câu hỏi bị lỗi hoặc thiếu dữ liệu. Các câu hợp lệ đã được lưu an toàn vào Google Sheet / Database.'
+                        : 'Bộ câu hỏi đã được lưu thật vào QUESTION_BANKS và QUESTIONS. Dữ liệu sẽ tồn tại lâu dài và sẵn sàng cho các game.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetFile}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>TẠO BỘ KHÁC</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Exact Summary Details Breakdown (Requirement 17) */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-1 sm:col-span-2">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Tên bộ câu hỏi
+                  </div>
+                  <div className="text-sm font-black text-cyan-300 truncate" title={saveSummary.bank.name}>
+                    {saveSummary.bank.name}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono truncate">
+                    Khối {saveSummary.bank.grade} • {saveSummary.bank.subject}
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 text-center">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase">
+                    Tổng số dòng
+                  </div>
+                  <div className="text-xl font-black text-white mt-1">
+                    {saveSummary.totalRows}
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 text-center">
+                  <div className="text-[11px] font-bold text-emerald-400 uppercase">
+                    ✅ Đã lưu
+                  </div>
+                  <div className="text-xl font-black text-emerald-400 mt-1">
+                    {saveSummary.createdCount}
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 text-center">
+                  <div className="text-[11px] font-bold text-cyan-400 uppercase">
+                    🔄 Cập nhật
+                  </div>
+                  <div className="text-xl font-black text-cyan-300 mt-1">
+                    {saveSummary.updatedCount}
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 text-center">
+                  <div className="text-[11px] font-bold text-amber-400 uppercase">
+                    ⏭ Bỏ qua
+                  </div>
+                  <div className="text-xl font-black text-amber-300 mt-1">
+                    {saveSummary.skippedCount}
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 text-center">
+                  <div className="text-[11px] font-bold text-rose-400 uppercase">
+                    ❌ Lỗi
+                  </div>
+                  <div className={`text-xl font-black mt-1 ${saveSummary.failedCount > 0 ? 'text-rose-400' : 'text-slate-500'}`}>
+                    {saveSummary.failedCount}
+                  </div>
+                </div>
+              </div>
+
+              {/* Error list toggle for Partial Success (Requirement 18) */}
+              {saveSummary.partial && saveSummary.errors && saveSummary.errors.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setShowErrorsList(!showErrorsList)}
+                      className="text-xs font-bold text-rose-400 hover:text-rose-300 flex items-center gap-1.5 cursor-pointer underline"
+                    >
+                      <AlertCircle className="w-4 h-4" />
+                      <span>{showErrorsList ? 'ẨN DANH SÁCH LỖI' : 'XEM LỖI CHI TIẾT'} ({saveSummary.errors.length})</span>
+                    </button>
+                    <span className="text-[11px] text-slate-500">
+                      Các câu lỗi không được lưu vào cơ sở dữ liệu
+                    </span>
+                  </div>
+
+                  {showErrorsList && (
+                    <div className="max-h-48 overflow-y-auto bg-rose-950/30 border border-rose-500/30 rounded-2xl p-3 space-y-1.5 text-xs text-rose-200 animate-in fade-in">
+                      {saveSummary.errors.map((err, idx) => (
+                        <div key={idx} className="flex items-start gap-2">
+                          <span className="text-rose-400 font-mono">•</span>
+                          <span>{err}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Action Buttons based on Partial vs Full (Requirement 17 & 18) */}
+              <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+                {saveSummary.partial && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowErrorsList(!showErrorsList)}
+                      className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-500/40 font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center gap-2"
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span>XEM LỖI</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveQuestionBank}
+                      className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-600/20 cursor-pointer transition-all flex items-center gap-2"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>THỬ LƯU LẠI</span>
+                    </button>
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleFinishAndUse}
+                  className="px-7 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-xl shadow-emerald-500/20 cursor-pointer transition-all flex items-center gap-2"
+                >
+                  <Check className="w-4 h-4 stroke-[3]" />
+                  <span>XEM BỘ CÂU HỎI</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Error Banner if any */}
+          {saveErrorMessage && (
+            <div className="bg-rose-950/80 border border-rose-500/50 rounded-2xl p-4 flex items-start gap-3 animate-in fade-in">
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-1 flex-1">
+                <h4 className="text-xs font-black uppercase tracking-wider text-rose-300">
+                  LỖI PERSISTENCE COMMIT
+                </h4>
+                <p className="text-xs text-rose-200/90 leading-relaxed">
+                  {saveErrorMessage}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSaveErrorMessage(null)}
+                className="text-rose-400 hover:text-white text-xs cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* UPLOAD AREA (When no file or idle) */}
+          {!file && importStage !== 'DATA_SAVED' && (
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -564,12 +789,14 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                   <strong className="text-slate-300">Excel (.xls)</strong>
                 </p>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  💡 Không yêu cầu thứ tự cột chuẩn. Hệ thống tự động nhận diện tiêu đề bằng tiếng Việt & tiếng Anh.
+                  💡 Không tự động lưu ngay khi chọn tệp. Hệ thống sẽ cho phép xem trước, kiểm tra lỗi và nhập tên bộ câu hỏi.
                 </p>
               </div>
             </div>
-          ) : (
-            /* FILE INFO BANNER & CONTROLS */
+          )}
+
+          {/* FILE INFO & SHEET SWITCHER */}
+          {file && importStage !== 'DATA_SAVED' && (
             <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
@@ -581,137 +808,176 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-white">{fileInfo?.name}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/30 font-semibold">
+                    <span className="text-sm font-black text-white">{fileInfo?.name}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-cyan-300 font-bold">
                       {fileInfo?.type}
                     </span>
-                    <span className="text-xs text-slate-500">{fileInfo?.size}</span>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Đã đọc được <strong className="text-cyan-300">{rawRows.length} dòng</strong> dữ liệu
+                  <p className="text-xs text-slate-400">
+                    Kích thước: {fileInfo?.size} • Tổng số dòng: <strong className="text-white">{rawRows.length}</strong>
                   </p>
                 </div>
               </div>
 
-              {/* Multi-sheet Selector (if Excel) */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Excel Sheet selector if multiple */}
                 {sheetNames.length > 1 && (
-                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-xl">
-                    <Layers className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs font-bold text-slate-300">Sheet:</span>
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 py-1">
+                    <span className="text-xs text-slate-400 font-bold">Sheet:</span>
                     <select
                       value={selectedSheet}
                       onChange={(e) => handleSheetChange(e.target.value)}
-                      className="bg-transparent text-xs font-bold text-cyan-400 focus:outline-none cursor-pointer"
+                      className="bg-transparent text-xs text-cyan-300 font-bold focus:outline-none cursor-pointer"
                     >
-                      {sheetNames.map((s) => (
-                        <option key={s} value={s} className="bg-slate-900 text-white">
-                          {s}
+                      {sheetNames.map((name) => (
+                        <option key={name} value={name} className="bg-slate-900 text-white">
+                          {name}
                         </option>
                       ))}
                     </select>
                   </div>
                 )}
 
-                {/* Re-map button */}
+                {/* Toggle Column Mapping */}
                 <button
                   type="button"
                   onClick={() => setShowMappingConfig(!showMappingConfig)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                     showMappingConfig
-                      ? 'bg-cyan-600 text-white border-cyan-500'
-                      : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
+                      ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
                   }`}
                 >
                   <Settings className="w-3.5 h-3.5" />
-                  <span>{showMappingConfig ? 'Ẩn cài đặt cột' : 'Tùy chỉnh cột'}</span>
+                  <span>Cấu hình cột</span>
                 </button>
 
-                {/* Re-upload button */}
+                {/* Clear / Replace File */}
                 <button
                   type="button"
                   onClick={handleResetFile}
-                  className="px-3 py-1.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  className="p-2 text-rose-400 hover:bg-rose-950/40 border border-transparent hover:border-rose-500/30 rounded-xl transition-all cursor-pointer"
+                  title="Xóa tệp và chọn tệp khác"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Chọn tệp khác</span>
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </div>
           )}
 
-          {/* LƯU THÀNH BÀI HỌC VÀO NGÂN HÀNG ĐỂ CHỌN TRONG CÁC GAME */}
-          {file && (
-            <div className="bg-gradient-to-r from-slate-900 via-cyan-950/40 to-slate-900 border border-cyan-500/30 rounded-2xl p-4 space-y-3 shadow-lg">
+          {/* ============================================================ */}
+          {/* SAVE FORM: REQUIRED METADATA BEFORE SAVING (Requirement M) */}
+          {/* ============================================================ */}
+          {file && importStage !== 'DATA_SAVED' && (
+            <div className="bg-gradient-to-r from-slate-900 via-cyan-950/40 to-slate-900 border border-cyan-500/30 rounded-2xl p-4 sm:p-5 space-y-4 shadow-lg">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-black uppercase text-cyan-300">
-                  <input
-                    type="checkbox"
-                    checked={saveToBank}
-                    onChange={(e) => setSaveToBank(e.target.checked)}
-                    className="w-4 h-4 rounded text-cyan-500 focus:ring-cyan-400 cursor-pointer"
-                  />
-                  <span>LƯU THÀNH BÀI HỌC VÀO NGÂN HÀNG ĐỂ CHỌN TRONG CÁC TRÒ CHƠI</span>
-                </label>
-                {saveToBank && (
-                  <span className="text-[11px] text-emerald-300 font-bold bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/40 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Tự động lưu & nạp sẵn cho các Game
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+                    <Save className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-xs font-black uppercase text-cyan-300 tracking-wider">
+                    THÔNG TIN BỘ CÂU HỎI (BẮT BUỘC TRƯỚC KHI LƯU)
+                  </h3>
+                </div>
+                <span className="text-[11px] text-cyan-400 font-bold">
+                  Sẽ được lưu vào Kho câu hỏi & đồng bộ sẵn cho mọi Game
+                </span>
               </div>
 
-              {saveToBank && (
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
-                  <div className="sm:col-span-3">
-                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                      1. Khối Lớp (1 - 9):
-                    </label>
-                    <select
-                      value={lessonGrade}
-                      onChange={(e) => setLessonGrade(Number(e.target.value) as GradeLevel)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-black focus:border-cyan-400 focus:outline-none"
-                    >
-                      {([1, 2, 3, 4, 5, 6, 7, 8, 9] as GradeLevel[]).map((g) => (
-                        <option key={g} value={g} className="bg-slate-900 text-white">
-                          Khối {g}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="sm:col-span-4">
-                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                      2. Môn Học:
-                    </label>
-                    <input
-                      type="text"
-                      value={lessonSubject}
-                      onChange={(e) => setLessonSubject(e.target.value)}
-                      placeholder="VD: Tin học, Toán, Tiếng Việt..."
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-bold focus:border-cyan-400 focus:outline-none placeholder:text-slate-600"
-                    />
-                  </div>
-
-                  <div className="sm:col-span-5">
-                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                      3. Tên Bài Học / Chủ Đề:
-                    </label>
-                    <input
-                      type="text"
-                      value={lessonTitle}
-                      onChange={(e) => setLessonTitle(e.target.value)}
-                      placeholder="VD: Bài 3: Định dạng văn bản..."
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-cyan-300 font-black focus:border-cyan-400 focus:outline-none placeholder:text-slate-600"
-                    />
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
+                {/* 1. Tên bộ câu hỏi (Required) */}
+                <div className="sm:col-span-5">
+                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                    1. Tên Bộ Câu Hỏi / Bài Học: <span className="text-rose-400 font-black">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={bankName}
+                    onChange={(e) => {
+                      setBankName(e.target.value);
+                      setNameTouched(true);
+                    }}
+                    onBlur={() => setNameTouched(true)}
+                    placeholder="VD: Bài 1: Khám phá máy tính..."
+                    className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-xs text-cyan-300 font-black focus:outline-none transition-all ${
+                      nameTouched && !isNameValid
+                        ? 'border-rose-500 focus:border-rose-400 bg-rose-950/20'
+                        : 'border-slate-700 focus:border-cyan-400'
+                    }`}
+                  />
+                  {nameTouched && !isNameValid && (
+                    <p className="text-[10px] text-rose-400 font-bold mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Tên bộ câu hỏi là bắt buộc, không được để trống.
+                    </p>
+                  )}
                 </div>
-              )}
+
+                {/* 2. Khối lớp */}
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                    2. Khối Lớp: <span className="text-rose-400 font-black">*</span>
+                  </label>
+                  <select
+                    value={bankGrade}
+                    onChange={(e) => setBankGrade(Number(e.target.value) as GradeLevel)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-black focus:border-cyan-400 focus:outline-none cursor-pointer"
+                  >
+                    {([1, 2, 3, 4, 5, 6, 7, 8, 9] as GradeLevel[]).map((g) => (
+                      <option key={g} value={g} className="bg-slate-900 text-white">
+                        Khối {g}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Môn học */}
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                    3. Môn Học: <span className="text-rose-400 font-black">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={bankSubject}
+                    onChange={(e) => setBankSubject(e.target.value)}
+                    placeholder="VD: Tin học, Toán..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-bold focus:border-cyan-400 focus:outline-none"
+                  />
+                </div>
+
+                {/* 4. Chủ đề / Topic (Optional) */}
+                <div className="sm:col-span-3">
+                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                    4. Chủ Đề (Tùy chọn):
+                  </label>
+                  <input
+                    type="text"
+                    value={bankTopic}
+                    onChange={(e) => setBankTopic(e.target.value)}
+                    placeholder="VD: Chủ đề A: Máy tính & Em"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:border-cyan-400 focus:outline-none placeholder:text-slate-600"
+                  />
+                </div>
+
+                {/* 5. Mô tả / Description (Optional) */}
+                <div className="sm:col-span-12">
+                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                    5. Mô Tả (Tùy chọn):
+                  </label>
+                  <input
+                    type="text"
+                    value={bankDescription}
+                    onChange={(e) => setBankDescription(e.target.value)}
+                    placeholder="VD: Bộ câu hỏi ôn tập giữa kỳ theo chương trình mới..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:border-cyan-400 focus:outline-none placeholder:text-slate-600"
+                  />
+                </div>
+              </div>
             </div>
           )}
 
-          {/* COLUMN MAPPING ACCORDION (If user wants to adjust) */}
-          {file && showMappingConfig && (
+          {/* COLUMN MAPPING ACCORDION */}
+          {file && showMappingConfig && importStage !== 'DATA_SAVED' && (
             <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3 animate-in fade-in">
               <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
                 <h4 className="text-xs font-black uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
@@ -719,7 +985,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                   Khớp Cột Dữ Liệu (Column Mapping)
                 </h4>
                 <span className="text-[11px] text-slate-400">
-                  Hệ thống đã tự động nhận diện. Thầy/cô có thể chọn lại nếu muốn.
+                  Hệ thống đã tự động nhận diện. Thầy/cô có thể tùy chỉnh nếu cần.
                 </span>
               </div>
 
@@ -767,68 +1033,49 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
             </div>
           )}
 
-          {/* IMPORT MODE & STATS BAR */}
-          {file && (
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                {/* Mode Selector */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-300 block uppercase">Chế độ nhập dữ liệu:</label>
-                  <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        soundService.playClick();
-                        setImportMode('APPEND');
-                      }}
-                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                        importMode === 'APPEND'
-                          ? 'bg-cyan-600 text-white shadow'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      ➕ Thêm Mới
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        soundService.playClick();
-                        setImportMode('UPDATE_DUPLICATE');
-                      }}
-                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                        importMode === 'UPDATE_DUPLICATE'
-                          ? 'bg-cyan-600 text-white shadow'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      🔄 Cập Nhật Nếu Trùng
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        soundService.playClick();
-                        setImportMode('REPLACE_ALL');
-                      }}
-                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                        importMode === 'REPLACE_ALL'
-                          ? 'bg-rose-600 text-white shadow'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      ⚠️ Thay Thế Toàn Bộ
-                    </button>
-                  </div>
+          {/* ======================================================== */}
+          {/* STEP 2: PREVIEW & STATS TABLE (Stage: FILE_PARSED)       */}
+          {/* ======================================================== */}
+          {file && importStage !== 'DATA_SAVED' && (
+            <div className="space-y-4">
+              {/* Toolbar & Filter Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/80 p-3 rounded-2xl border border-slate-800">
+                {/* Stats Chips */}
+                <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                  <span className="px-3 py-1 bg-slate-900 text-slate-300 rounded-xl border border-slate-800">
+                    Tổng dòng: <strong>{stats.total}</strong>
+                  </span>
+                  <span className="px-3 py-1 bg-emerald-950/60 text-emerald-300 rounded-xl border border-emerald-500/30 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Hợp lệ: <strong>{stats.valid}</strong>
+                  </span>
+                  {stats.warning > 0 && (
+                    <span className="px-3 py-1 bg-amber-950/60 text-amber-300 rounded-xl border border-amber-500/30 flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      Cảnh báo: <strong>{stats.warning}</strong>
+                    </span>
+                  )}
+                  {stats.error > 0 && (
+                    <span className="px-3 py-1 bg-rose-950/60 text-rose-300 rounded-xl border border-rose-500/30 flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Lỗi: <strong>{stats.error}</strong>
+                    </span>
+                  )}
+                  {stats.duplicates > 0 && (
+                    <span className="px-3 py-1 bg-purple-950/60 text-purple-300 rounded-xl border border-purple-500/30">
+                      Trùng lặp: <strong>{stats.duplicates}</strong>
+                    </span>
+                  )}
                 </div>
 
-                {/* Filter View Selector */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-300 block uppercase">Bộ lọc xem trước:</label>
-                  <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                {/* Filter view & mode */}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs font-bold">
                     <button
                       type="button"
                       onClick={() => setFilterView('ALL')}
-                      className={`px-2.5 py-1.5 rounded-lg font-semibold cursor-pointer ${
-                        filterView === 'ALL' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                        filterView === 'ALL' ? 'bg-cyan-600 text-slate-950' : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       Tất cả ({stats.total})
@@ -836,74 +1083,59 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setFilterView('VALID_ONLY')}
-                      className={`px-2.5 py-1.5 rounded-lg font-semibold cursor-pointer ${
-                        filterView === 'VALID_ONLY' ? 'bg-emerald-950 text-emerald-300' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                        filterView === 'VALID_ONLY' ? 'bg-emerald-600 text-slate-950' : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       Hợp lệ ({stats.valid + stats.warning})
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setFilterView('ERROR_ONLY')}
-                      className={`px-2.5 py-1.5 rounded-lg font-semibold cursor-pointer ${
-                        filterView === 'ERROR_ONLY' ? 'bg-rose-950 text-rose-300' : 'text-slate-400 hover:text-white'
-                      }`}
+                    {stats.error > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterView('ERROR_ONLY')}
+                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                          filterView === 'ERROR_ONLY' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Chỉ dòng lỗi ({stats.error})
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Duplicate Strategy */}
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 font-bold">
+                    <span>Xử lý trùng:</span>
+                    <select
+                      value={importMode}
+                      onChange={(e) => setImportMode(e.target.value as QuestionImportMode)}
+                      className="bg-slate-900 border border-slate-700 text-cyan-300 text-xs rounded-xl px-2 py-1 focus:outline-none"
                     >
-                      Lỗi ({stats.error})
-                    </button>
+                      <option value="APPEND">Bỏ qua câu trùng</option>
+                      <option value="UPDATE_DUPLICATE">Cập nhật nội dung câu trùng</option>
+                      <option value="REPLACE_ALL">Ghi đè toàn bộ</option>
+                    </select>
                   </div>
                 </div>
               </div>
 
-              {/* Statistics Pill Counters */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-slate-800">
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <p className="text-[11px] text-slate-400">Tổng số dòng đọc được</p>
-                  <p className="text-lg font-black text-white">{stats.total}</p>
-                </div>
-                <div className="bg-emerald-950/40 p-3 rounded-xl border border-emerald-500/30">
-                  <p className="text-[11px] text-emerald-400">✅ Hợp lệ sẵn sàng nhập</p>
-                  <p className="text-lg font-black text-emerald-300">{stats.valid}</p>
-                </div>
-                <div className="bg-amber-950/40 p-3 rounded-xl border border-amber-500/30">
-                  <p className="text-[11px] text-amber-400">⚠️ Trùng câu hỏi</p>
-                  <p className="text-lg font-black text-amber-300">
-                    {stats.duplicates} {importMode === 'UPDATE_DUPLICATE' ? '(Sẽ cập nhật)' : importMode === 'APPEND' ? '(Bỏ qua)' : ''}
-                  </p>
-                </div>
-                <div className="bg-rose-950/40 p-3 rounded-xl border border-rose-500/30">
-                  <p className="text-[11px] text-rose-400">❌ Sai định dạng / Lỗi</p>
-                  <p className="text-lg font-black text-rose-300">{stats.error}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* PREVIEW TABLE */}
-          {file && (
-            <div className="space-y-2">
-              <h4 className="text-xs font-black uppercase text-slate-300 tracking-wider flex items-center gap-2">
-                <Eye className="w-4 h-4 text-cyan-400" />
-                <span>Bảng Xem Trước Dữ Liệu ({displayedRows.length} dòng hiển thị)</span>
-              </h4>
-
-              <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/80 max-h-[380px] overflow-y-auto">
+              {/* Preview Table */}
+              <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/60 max-h-[380px] overflow-y-auto">
                 <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-900/90 text-slate-300 font-bold uppercase sticky top-0 z-10 border-b border-slate-800">
+                  <thead className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-slate-800 text-[11px] font-black uppercase tracking-wider text-slate-400 z-10">
                     <tr>
-                      <th className="p-3 w-12 text-center">STT</th>
-                      <th className="p-3 w-2/5">Câu hỏi & Chủ đề</th>
-                      <th className="p-3">Các lựa chọn</th>
-                      <th className="p-3 w-24 text-center">Đáp án</th>
-                      <th className="p-3 w-20 text-center">Điểm</th>
-                      <th className="p-3 w-36 text-center">Trạng thái</th>
+                      <th className="p-3 w-12 text-center">#</th>
+                      <th className="p-3 w-1/3">Nội dung câu hỏi</th>
+                      <th className="p-3">Phương án lựa chọn (A, B, C, D)</th>
+                      <th className="p-3 w-16 text-center">Đáp án</th>
+                      <th className="p-3 w-16 text-center">Điểm</th>
+                      <th className="p-3 w-28 text-center">Trạng thái</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {displayedRows.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-8 text-center text-slate-500">
-                          Không có dòng nào phù hợp với bộ lọc hiển thị.
+                        <td colSpan={6} className="p-8 text-center text-slate-500 font-medium">
+                          Không có dòng nào phù hợp với bộ lọc.
                         </td>
                       </tr>
                     ) : (
@@ -912,39 +1144,27 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                         return (
                           <tr
                             key={row.rowNumber}
-                            className={`hover:bg-slate-900/60 transition-colors ${
+                            className={`transition-colors hover:bg-slate-900/40 ${
                               row.status === 'ERROR'
-                                ? 'bg-rose-950/20'
+                                ? 'bg-rose-950/10'
                                 : row.status === 'WARNING'
-                                ? 'bg-amber-950/20'
+                                ? 'bg-amber-950/10'
                                 : ''
                             }`}
                           >
-                            <td className="p-3 font-mono text-center text-slate-400 font-bold">
+                            <td className="p-3 text-center font-mono text-slate-500 font-bold">
                               {row.rowNumber}
                             </td>
 
-                            <td className="p-3 space-y-1">
-                              <p className="font-semibold text-white leading-snug">
-                                {q?.question || <span className="text-rose-400 italic">Trống nội dung</span>}
+                            <td className="p-3 font-medium text-slate-200">
+                              <p className="line-clamp-2 leading-relaxed">
+                                {q?.question || <span className="text-rose-400 italic font-normal">Thiếu nội dung câu hỏi</span>}
                               </p>
-                              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                                {q?.category && (
-                                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
-                                    {q.category}
-                                  </span>
-                                )}
-                                {q?.isSpecial && (
-                                  <span className="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-500/30 font-bold">
-                                    ★ Đặc biệt
-                                  </span>
-                                )}
-                                {q?.explanation && (
-                                  <span className="text-slate-400 italic truncate max-w-xs" title={q.explanation}>
-                                    💡 {q.explanation}
-                                  </span>
-                                )}
-                              </div>
+                              {q?.explanation && (
+                                <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1 italic">
+                                  💡 {q.explanation}
+                                </p>
+                              )}
                             </td>
 
                             <td className="p-3">
@@ -990,12 +1210,10 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
                                 </span>
                               )}
                               {row.status === 'WARNING' && (
-                                <div className="space-y-0.5">
-                                  <span className="inline-flex items-center gap-1 text-amber-400 font-bold text-[10px] bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                                    <AlertTriangle className="w-3 h-3" />
-                                    {row.statusText}
-                                  </span>
-                                </div>
+                                <span className="inline-flex items-center gap-1 text-amber-400 font-bold text-[10px] bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  {row.statusText}
+                                </span>
                               )}
                               {row.status === 'ERROR' && (
                                 <div className="space-y-0.5">
@@ -1022,52 +1240,75 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
           )}
         </div>
 
-        {/* Footer Actions */}
-        <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        {/* ======================================================== */}
+        {/* FOOTER ACTIONS (Requirement L: 💾 LƯU BỘ CÂU HỎI & HỦY) */}
+        {/* ======================================================== */}
+        <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/95 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="text-xs text-slate-400">
-            {file ? (
+            {importStage === 'DATA_SAVED' ? (
+              <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4" />
+                Dữ liệu đã được lưu thành công vào Repository!
+              </span>
+            ) : file ? (
               <span>
-                Sẽ nhập{' '}
+                Sẵn sàng lưu{' '}
                 <strong className="text-emerald-400 font-bold">
-                  {validatedRows.filter((r) => r.status !== 'ERROR' && (importMode !== 'APPEND' || !r.isDuplicate)).length}
+                  {rowsToSave.length}
                 </strong>{' '}
-                câu hỏi hợp lệ vào Ngân hàng câu hỏi
+                câu hỏi hợp lệ vào ngân hàng{' '}
+                <strong className="text-cyan-300 font-bold">
+                  "{bankName.trim() || 'Chưa đặt tên'}"
+                </strong>
               </span>
             ) : (
-              <span>Vui lòng kéo hoặc chọn tệp để bắt đầu</span>
+              <span>Vui lòng chọn tệp CSV hoặc Excel để bắt đầu</span>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            {/* HỦY Button */}
             <button
               type="button"
               onClick={() => {
                 soundService.playClick();
                 onClose();
               }}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
             >
               HỦY
             </button>
 
-            <button
-              type="button"
-              disabled={!file || stats.valid + (importMode === 'UPDATE_DUPLICATE' ? stats.warning : 0) === 0 || isProcessing}
-              onClick={handleConfirmImport}
-              className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-cyan-500/20 cursor-pointer transition-all flex items-center gap-2"
-            >
-              {isProcessing ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Đang xử lý...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 stroke-[3]" />
-                  <span>NHẬP CÁC DÒNG HỢP LỆ</span>
-                </>
-              )}
-            </button>
+            {/* 💾 LƯU BỘ CÂU HỎI Button (Requirement L) */}
+            {importStage !== 'DATA_SAVED' ? (
+              <button
+                type="button"
+                disabled={!canSave}
+                onClick={handleSaveQuestionBank}
+                className="px-6 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-cyan-500/25 cursor-pointer transition-all flex items-center gap-2"
+              >
+                {importStage === 'SAVING' ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>⏳ ĐANG LƯU...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 stroke-[2.5]" />
+                    <span>💾 LƯU BỘ CÂU HỎI</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleFinishAndUse}
+                className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/25 cursor-pointer transition-all flex items-center gap-2"
+              >
+                <Check className="w-4 h-4 stroke-[3]" />
+                <span>HOÀN TẤT & ĐÓNG</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

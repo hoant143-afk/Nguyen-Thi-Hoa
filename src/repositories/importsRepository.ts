@@ -1,13 +1,7 @@
 import { apiClient } from '../services/apiClient';
+import { ImportBatchResult } from './questionsRepository';
 
-export interface ImportBatchResult {
-  total: number;
-  created: number;
-  updated: number;
-  skipped: number;
-  failed: number;
-  errors: string[];
-}
+export type { ImportBatchResult };
 
 export class ImportsRepository {
   /**

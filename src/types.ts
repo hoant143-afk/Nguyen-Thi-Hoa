@@ -61,10 +61,30 @@ export interface QuestionBankLesson {
   id: string;
   grade: GradeLevel;
   subject: string;
-  lessonNumber: number;
+  lessonNumber?: number;
   lessonTitle: string;
+  topic?: string;
   description?: string;
+  enabled?: boolean;
+  updatedAt?: string | number;
+  createdAt?: string | number;
   questions: Question[];
+}
+
+export interface QuestionBank {
+  id: string;
+  bankCode?: string;
+  name: string;
+  lessonTitle?: string; // alias for name
+  subject: string;
+  grade: GradeLevel | number;
+  topic?: string;
+  description?: string;
+  questionCount: number;
+  enabled?: boolean;
+  createdAt?: number | string;
+  updatedAt?: number | string;
+  questions?: Question[];
 }
 
 export interface Question {
@@ -79,7 +99,7 @@ export interface Question {
   options: string[]; // 4 choices [A, B, C, D]
   correctAnswer: number; // 0, 1, 2, 3
   explanation: string;
-  category: string;
+  category?: string;
   difficulty?: 'EASY' | 'MEDIUM' | 'HARD';
   normalPoints?: number;
   bonusPoints?: number;
@@ -170,7 +190,11 @@ export interface GameSettings {
 }
 
 export interface GameSession {
+  id?: string;
   gameId: string;
+  gameName?: string;
+  date?: string;
+  winnerTeamName?: string;
   blueTeamName: string;
   orangeTeamName: string;
   className: string;
@@ -245,5 +269,20 @@ export interface CertificateConfig {
   showSeal: boolean;
   dateStr: string;
   score?: number;
+}
+
+export interface CertificateRecord {
+  id: string;
+  certificateCode: string;
+  teamName: string;
+  gameId: string;
+  gameName: string;
+  awardTitle: string;
+  score: number;
+  className: string;
+  teacherName: string;
+  schoolName: string;
+  issuedDate: string;
+  customMessage: string;
 }
 

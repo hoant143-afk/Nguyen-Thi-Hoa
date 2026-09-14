@@ -10,6 +10,8 @@ import { RandomPickerGame } from './games/random-picker/RandomPickerGame';
 import { TeamChallengeGame } from './games/team-challenge/TeamChallengeGame';
 import { TeacherDashboard } from './components/teacher/TeacherDashboard';
 import { getGameById } from './games/gameRegistry';
+import { GameErrorBoundary } from './components/common/GameErrorBoundary';
+import { CloudStatusBanner } from './components/common/CloudStatusBanner';
 
 export default function App() {
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
@@ -56,31 +58,66 @@ export default function App() {
 
   // Render individual game views or home platform shell
   if (currentRoute === '/games/cam-race') {
-    return <CamRaceGame onBackToEduplay={() => navigateTo('/')} />;
+    return (
+      <GameErrorBoundary onGoHome={() => navigateTo('/')}>
+        <CamRaceGame onBackToEduplay={() => navigateTo('/')} />
+        <CloudStatusBanner />
+      </GameErrorBoundary>
+    );
   }
 
-  if (currentRoute === '/games/smile-race' || currentRoute === '/games/quiz-battle') {
-    return <SmileRaceGame onBackToEduplay={() => navigateTo('/')} />;
+  if (currentRoute === '/games/smile-race') {
+    return (
+      <GameErrorBoundary onGoHome={() => navigateTo('/')}>
+        <SmileRaceGame onBackToEduplay={() => navigateTo('/')} />
+        <CloudStatusBanner />
+      </GameErrorBoundary>
+    );
   }
 
   if (currentRoute === '/games/lucky-wheel') {
-    return <LuckyWheelGame onBackToEduplay={() => navigateTo('/')} />;
+    return (
+      <GameErrorBoundary onGoHome={() => navigateTo('/')}>
+        <LuckyWheelGame onBackToEduplay={() => navigateTo('/')} />
+        <CloudStatusBanner />
+      </GameErrorBoundary>
+    );
   }
 
   if (currentRoute === '/games/fastest-hand') {
-    return <FastestHandGame onBackToEduplay={() => navigateTo('/')} />;
+    return (
+      <GameErrorBoundary onGoHome={() => navigateTo('/')}>
+        <FastestHandGame onBackToEduplay={() => navigateTo('/')} />
+        <CloudStatusBanner />
+      </GameErrorBoundary>
+    );
   }
 
   if (currentRoute === '/games/random-picker') {
-    return <RandomPickerGame onBackToEduplay={() => navigateTo('/')} />;
+    return (
+      <GameErrorBoundary onGoHome={() => navigateTo('/')}>
+        <RandomPickerGame onBackToEduplay={() => navigateTo('/')} />
+        <CloudStatusBanner />
+      </GameErrorBoundary>
+    );
   }
 
   if (currentRoute === '/games/team-challenge') {
-    return <TeamChallengeGame onBackToEduplay={() => navigateTo('/')} />;
+    return (
+      <GameErrorBoundary onGoHome={() => navigateTo('/')}>
+        <TeamChallengeGame onBackToEduplay={() => navigateTo('/')} />
+        <CloudStatusBanner />
+      </GameErrorBoundary>
+    );
   }
 
   if (currentRoute === '/admin' || currentRoute === '/classes' || currentRoute === '/questions') {
-    return <TeacherDashboard onBackToEduplay={() => navigateTo('/')} />;
+    return (
+      <GameErrorBoundary onGoHome={() => navigateTo('/')}>
+        <TeacherDashboard onBackToEduplay={() => navigateTo('/')} />
+        <CloudStatusBanner />
+      </GameErrorBoundary>
+    );
   }
 
   // Default: EDUPLAY Platform Home
@@ -104,6 +141,7 @@ export default function App() {
       </main>
 
       <EduplayFooter />
+      <CloudStatusBanner />
     </div>
   );
 }

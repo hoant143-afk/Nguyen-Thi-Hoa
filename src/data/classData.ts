@@ -71,7 +71,9 @@ export interface MatchHistoryEntry {
   gameName: string;
   className: string;
   timestamp: number;
+  startedAt?: number | string;
   winner: string; // Tên đội chiến thắng
+  winnerName?: string;
   summary: string;
   teamCount?: number;
   teams?: {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BookOpen,
   GraduationCap,
@@ -10,9 +10,19 @@ import {
   ChevronRight,
   Search,
   Upload,
+  RefreshCw,
+  Database,
 } from 'lucide-react';
-import { GradeLevel, QuestionBankLesson } from '../../types';
+import { GradeLevel, QuestionBankLesson, Question, QuestionBank } from '../../types';
 import { QuestionBankRepository } from '../../repositories/questionBankRepository';
+import {
+  questionBanksRepository,
+  refreshQuestionBanks,
+} from '../../repositories/questionBanksRepository';
+import {
+  questionsRepository,
+  refreshQuestions,
+} from '../../repositories/questionsRepository';
 import { soundService } from '../../services/soundService';
 import { QuestionImportModal } from './QuestionImportModal';
 
@@ -31,33 +41,109 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
   onClose,
   isModal = false,
 }) => {
-  // Determine initial grade from currently selected lesson or default to 5
-  const initialLesson = useMemo(() => {
-    return QuestionBankRepository.getLessonById(selectedLessonId) || QuestionBankRepository.getSelectedLesson();
-  }, [selectedLessonId]);
+  const [banks, setBanks] = useState<QuestionBank[]>([]);
+  const [legacyLessons, setLegacyLessons] = useState<QuestionBankLesson[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const [activeGrade, setActiveGrade] = useState<GradeLevel>(initialLesson ? initialLesson.grade : 5);
+  // Initial grade
+  const [activeGrade, setActiveGrade] = useState<GradeLevel>(5);
   const [activeSubject, setActiveSubject] = useState<string>('Tất cả môn');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [previewLesson, setPreviewLesson] = useState<QuestionBankLesson | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
+
+  // Load banks and synchronize with repositories (Requirement K)
+  const loadBanksData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      // 1. Fetch from new QuestionBanksRepository
+      const bankList = await questionBanksRepository.list();
+      setBanks(bankList);
+
+      // 2. Fetch from legacy QuestionBankRepository
+      const lessons = QuestionBankRepository.getLessons();
+      setLegacyLessons(lessons);
+
+      // Set initial grade from selected if possible
+      const curr = lessons.find((l) => l.id === selectedLessonId);
+      if (curr) {
+        setActiveGrade(curr.grade);
+      }
+    } catch (err) {
+      console.error('Lỗi tải danh sách ngân hàng câu hỏi:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedLessonId]);
+
+  useEffect(() => {
+    loadBanksData();
+  }, [loadBanksData]);
+
+  // Merge banks: prioritize questionBanksRepository, fallback to legacy
+  const combinedLessons = useMemo(() => {
+    const lessonMap = new Map<string, QuestionBankLesson>();
+
+    // Put legacy lessons first
+    legacyLessons.forEach((l) => {
+      lessonMap.set(l.id, l);
+    });
+
+    // Merge or add from QuestionBanks
+    banks.forEach((b) => {
+      const existing = lessonMap.get(b.id);
+      if (existing) {
+        lessonMap.set(b.id, {
+          ...existing,
+          lessonTitle: b.name || existing.lessonTitle,
+          grade: (b.grade as GradeLevel) || existing.grade,
+          subject: b.subject || existing.subject,
+          description: b.description !== undefined ? b.description : existing.description,
+        });
+      } else {
+        lessonMap.set(b.id, {
+          id: b.id,
+          grade: (b.grade as GradeLevel) || 5,
+          subject: b.subject,
+          lessonNumber: 1,
+          lessonTitle: b.name,
+          description: b.description || '',
+          questions: [],
+        });
+      }
+    });
+
+    return Array.from(lessonMap.values());
+  }, [banks, legacyLessons]);
 
   // Available subjects for active grade
   const subjects = useMemo(() => {
-    const rawSubjects = QuestionBankRepository.getSubjectsByGrade(activeGrade);
-    return ['Tất cả môn', ...rawSubjects];
-  }, [activeGrade]);
+    const subs = new Set<string>();
+    combinedLessons
+      .filter((l) => l.grade === activeGrade)
+      .forEach((l) => {
+        if (l.subject && l.subject.trim()) {
+          subs.add(l.subject.trim());
+        }
+      });
+    return ['Tất cả môn', ...Array.from(subs)];
+  }, [combinedLessons, activeGrade]);
 
-  // Reset subject filter if current subject is not in new grade's subjects
   const handleSelectGrade = (grade: GradeLevel) => {
     soundService.playClick();
     setActiveGrade(grade);
     setActiveSubject('Tất cả môn');
   };
 
-  // Filter lessons
+  // Filter lessons based on grade, subject, query
   const filteredLessons = useMemo(() => {
-    let list = QuestionBankRepository.getLessonsByGradeAndSubject(activeGrade, activeSubject);
+    let list = combinedLessons.filter((l) => l.grade === activeGrade);
+
+    if (activeSubject !== 'Tất cả môn') {
+      list = list.filter((l) => l.subject.toLowerCase() === activeSubject.toLowerCase());
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       list = list.filter(
@@ -68,13 +154,58 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
       );
     }
     return list;
-  }, [activeGrade, activeSubject, searchQuery]);
+  }, [combinedLessons, activeGrade, activeSubject, searchQuery]);
 
-  const handleChoose = (lesson: QuestionBankLesson) => {
+  // Load questions for selected bank via questionsRepository.listByBank(bankId) (Requirement K)
+  const handleChoose = async (lesson: QuestionBankLesson) => {
     soundService.playClick();
-    QuestionBankRepository.setSelectedLessonId(lesson.id);
-    onSelectLesson(lesson);
-    if (onClose) onClose();
+    try {
+      let questions = await questionsRepository.listByBank(lesson.id);
+
+      // Fallback to existing questions in lesson if repository list is empty
+      if (questions.length === 0 && lesson.questions && lesson.questions.length > 0) {
+        questions = lesson.questions;
+        // Seed into questionsRepository so it's cached
+        await questionsRepository.importBatch(lesson.id, questions, 'CREATE');
+      }
+
+      const fullLesson: QuestionBankLesson = {
+        ...lesson,
+        questions,
+      };
+
+      // Set selected in legacy repo for game engine
+      QuestionBankRepository.setSelectedLessonId(lesson.id);
+      QuestionBankRepository.saveLesson(fullLesson);
+
+      onSelectLesson(fullLesson);
+      if (onClose) onClose();
+    } catch (err) {
+      console.error('Lỗi khi nạp câu hỏi cho ngân hàng:', err);
+      // Still allow selecting with current questions
+      onSelectLesson(lesson);
+      if (onClose) onClose();
+    }
+  };
+
+  // Preview lesson questions
+  const handleOpenPreview = async (lesson: QuestionBankLesson) => {
+    soundService.playClick();
+    setIsPreviewLoading(true);
+    try {
+      let questions = await questionsRepository.listByBank(lesson.id);
+      if (questions.length === 0 && lesson.questions && lesson.questions.length > 0) {
+        questions = lesson.questions;
+      }
+      setPreviewLesson({
+        ...lesson,
+        questions,
+      });
+    } catch (err) {
+      setPreviewLesson(lesson);
+    } finally {
+      setIsPreviewLoading(false);
+    }
   };
 
   return (
@@ -94,7 +225,7 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Chọn khối lớp, môn học và bài học để nạp vào câu hỏi ván đấu
+                Dữ liệu đồng bộ trực tiếp từ Ngân Hàng Câu Hỏi (Repository Persistence)
               </p>
             </div>
           </div>
@@ -110,7 +241,7 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
               title="Tải lên tệp CSV/Excel để tạo bài học mới ngay"
             >
               <Upload className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>+ Tải lên bài mới</span>
+              <span>+ Nhập Tệp Mới</span>
             </button>
 
             {onClose && (
@@ -167,12 +298,12 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
             <Layers className="w-4 h-4 text-amber-400" />
             <span>2. Chọn Môn Học (Khối {activeGrade}):</span>
           </span>
-          {/* Search bar inside */}
-          <div className="relative w-40 sm:w-52">
+          {/* Search bar */}
+          <div className="relative w-40 sm:w-56">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Tìm bài học..."
+              placeholder="Tìm bộ câu hỏi..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-slate-950/80 border border-slate-800 rounded-lg pl-7 pr-2 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
@@ -208,21 +339,36 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs">
           <span className="font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-            <BookOpen className="w-4 h-4 text-emerald-400" />
-            <span>3. Danh sách Bài học ({filteredLessons.length} bài sẵn có):</span>
+            <Database className="w-4 h-4 text-emerald-400" />
+            <span>3. Ngân Hàng Câu Hỏi ({filteredLessons.length} bộ khả dụng):</span>
           </span>
           <span className="text-slate-400 text-[11px]">Bấm &quot;Chọn bài này&quot; để thi đấu</span>
         </div>
 
-        {filteredLessons.length === 0 ? (
+        {isLoading ? (
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-8 text-center text-slate-400 space-y-2">
+            <RefreshCw className="w-6 h-6 animate-spin mx-auto text-cyan-400" />
+            <p className="text-xs">Đang nạp danh sách ngân hàng câu hỏi từ Repository...</p>
+          </div>
+        ) : filteredLessons.length === 0 ? (
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 text-center text-slate-400 space-y-2">
-            <p className="text-sm">Chưa có bài học nào khớp với bộ lọc &quot;{activeSubject}&quot; của Khối {activeGrade}.</p>
-            <p className="text-xs text-slate-500">Thầy cô có thể thêm bài học mới trong phần Cài đặt Quản lý ngân hàng câu hỏi.</p>
+            <p className="text-sm">
+              Chưa có bộ câu hỏi nào khớp với &quot;{activeSubject}&quot; của Khối {activeGrade}.
+            </p>
+            <p className="text-xs text-slate-500">
+              Thầy cô có thể bấm nút <strong>&quot;+ Nhập Tệp Mới&quot;</strong> ở góc trên để nạp câu hỏi từ CSV/Excel.
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[380px] overflow-y-auto pr-1">
             {filteredLessons.map((lesson) => {
               const isSelected = lesson.id === selectedLessonId;
+              const bankObj = banks.find((b) => b.id === lesson.id);
+              const questionCount =
+                bankObj?.questionCount !== undefined
+                  ? bankObj.questionCount
+                  : lesson.questions?.length || 0;
+
               return (
                 <div
                   key={lesson.id}
@@ -241,9 +387,19 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
                         <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-950/80 text-amber-300 border border-amber-500/40">
                           {lesson.subject}
                         </span>
+                        {bankObj?.topic && (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-purple-950/80 text-purple-300 border border-purple-500/40">
+                            Chủ đề: {bankObj.topic}
+                          </span>
+                        )}
                         <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-300">
-                          {lesson.questions.length} câu
+                          {questionCount} câu
                         </span>
+                        {bankObj?.updatedAt && (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            Cập nhật: {new Date(bankObj.updatedAt).toLocaleDateString('vi-VN')}
+                          </span>
+                        )}
                       </div>
 
                       {isSelected && (
@@ -268,11 +424,11 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
                   <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
                     <button
                       type="button"
-                      onClick={() => setPreviewLesson(lesson)}
+                      onClick={() => handleOpenPreview(lesson)}
                       className="text-xs text-slate-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer transition-colors py-1 px-2 rounded-lg hover:bg-slate-800"
                     >
                       <Eye className="w-3.5 h-3.5" />
-                      <span>Xem {lesson.questions.length} câu hỏi</span>
+                      <span>Xem {questionCount} câu hỏi</span>
                     </button>
 
                     <button
@@ -298,80 +454,81 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
       {/* PREVIEW MODAL */}
       {previewLesson && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150">
-            {/* Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-cyan-400" />
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    [Khối {previewLesson.grade} - {previewLesson.subject}] {previewLesson.lessonTitle}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Toàn bộ {previewLesson.questions.length} câu hỏi trắc nghiệm của bài học
-                  </p>
-                </div>
+          <div className="bg-slate-900 border border-slate-700 max-w-3xl w-full rounded-2xl p-6 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div>
+                <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">
+                  Khối {previewLesson.grade} • {previewLesson.subject}
+                </span>
+                <h3 className="text-lg font-black text-white">
+                  {previewLesson.lessonTitle}
+                </h3>
               </div>
               <button
-                type="button"
                 onClick={() => setPreviewLesson(null)}
-                className="text-slate-400 hover:text-white p-1"
+                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Questions list */}
-            <div className="p-4 overflow-y-auto space-y-3 flex-1">
-              {previewLesson.questions.map((q, idx) => (
-                <div key={q.id || idx} className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-cyan-400">
-                      Câu {idx + 1}
-                    </span>
-                    {q.category && (
-                      <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
-                        {q.category}
-                      </span>
+            <div className="flex-1 overflow-y-auto py-4 space-y-3">
+              {isPreviewLoading ? (
+                <div className="p-8 text-center text-slate-400">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-cyan-400" />
+                  <p className="text-xs mt-2">Đang tải câu hỏi...</p>
+                </div>
+              ) : previewLesson.questions.length === 0 ? (
+                <div className="p-8 text-center text-slate-500">
+                  Bài học này chưa có câu hỏi nào.
+                </div>
+              ) : (
+                previewLesson.questions.map((q, idx) => (
+                  <div
+                    key={q.id || idx}
+                    className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-cyan-400">Câu {idx + 1}:</span>
+                      <span className="text-[11px] text-slate-400">{q.normalPoints || 10} điểm</span>
+                    </div>
+                    <p className="text-white font-medium">{q.question}</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {q.options.map((opt, oIdx) => (
+                        <div
+                          key={oIdx}
+                          className={`p-2 rounded border ${
+                            oIdx === q.correctAnswer
+                              ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 font-bold flex items-center justify-between'
+                              : 'bg-slate-900 border-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <span>
+                            {String.fromCharCode(65 + oIdx)}. {opt}
+                          </span>
+                          {oIdx === q.correctAnswer && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                        </div>
+                      ))}
+                    </div>
+                    {q.explanation && (
+                      <p className="text-[11px] text-slate-400 italic bg-slate-900/50 p-2 rounded">
+                        💡 {q.explanation}
+                      </p>
                     )}
                   </div>
-                  <p className="text-xs font-semibold text-white">{q.question}</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
-                    {q.options.map((opt, oIdx) => (
-                      <div
-                        key={oIdx}
-                        className={`p-1.5 rounded-lg border text-[11px] flex items-center gap-1.5 ${
-                          oIdx === q.correctAnswer
-                            ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 font-bold'
-                            : 'bg-slate-900/60 border-slate-800/80 text-slate-400'
-                        }`}
-                      >
-                        <span className="font-mono font-bold text-slate-300">
-                          {String.fromCharCode(65 + oIdx)}.
-                        </span>
-                        <span>{opt}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {q.explanation && (
-                    <p className="text-[11px] text-slate-400 italic bg-slate-900/40 p-1.5 rounded border border-slate-800/50">
-                      💡 {q.explanation}
-                    </p>
-                  )}
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
-            {/* Footer */}
-            <div className="p-3 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between">
+            <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
               <span className="text-xs text-slate-400">
-                Tổng cộng: <strong className="text-white">{previewLesson.questions.length} câu</strong>
+                Tổng cộng: <strong className="text-white">{previewLesson.questions.length}</strong> câu hỏi
               </span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setPreviewLesson(null)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 hover:text-white"
+                  className="px-4 py-1.5 rounded-xl text-xs font-bold text-slate-400 hover:text-white"
                 >
                   Đóng
                 </button>
@@ -381,7 +538,7 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
                     handleChoose(previewLesson);
                     setPreviewLesson(null);
                   }}
-                  className="px-4 py-1.5 rounded-xl text-xs font-black bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center gap-1"
+                  className="px-4 py-1.5 rounded-xl text-xs font-black bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center gap-1 cursor-pointer"
                 >
                   <span>Chọn bài này để thi đấu</span>
                   <Check className="w-3.5 h-3.5 stroke-[3]" />
@@ -391,6 +548,7 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
           </div>
         </div>
       )}
+
       {/* UPLOAD MODAL */}
       {showImportModal && (
         <QuestionImportModal
@@ -400,12 +558,13 @@ export const QuestionBankSelector: React.FC<QuestionBankSelectorProps> = ({
           initialGrade={activeGrade}
           initialSubject={activeSubject !== 'Tất cả môn' ? activeSubject : 'Tin học'}
           saveAsLesson={true}
-          onImportLessonSuccess={(newLesson) => {
+          onImportLessonSuccess={async (newLesson) => {
             setShowImportModal(false);
+            await loadBanksData();
             handleChoose(newLesson);
           }}
-          onImportSuccess={() => {
-            // refresh
+          onImportSuccess={async () => {
+            await loadBanksData();
           }}
         />
       )}
