@@ -286,3 +286,34 @@ export interface CertificateRecord {
   customMessage: string;
 }
 
+export interface EduplayUser {
+  authUid: string;
+  email: string;
+  displayName: string;
+  photoUrl?: string;
+  schoolName?: string;
+  defaultSubject?: string;
+  defaultGrade?: string;
+  role: 'ADMIN' | 'TEACHER';
+  status: 'ACTIVE' | 'DISABLED';
+  emailVerified: boolean;
+  lastLoginAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface EduplayUserPreferences {
+  authUid: string;
+  theme?: 'LIGHT' | 'DARK';
+  soundEnabled?: boolean;
+  bgmVolume?: number;
+  sfxVolume?: number;
+  camResolution?: '720p' | '1080p' | '480p';
+  camConfidenceThreshold?: number;
+  defaultCountdownSeconds?: number;
+  defaultQuestionCount?: number;
+  defaultTeamCount?: number;
+  certificateAutoGenerate?: boolean;
+  updatedAt?: string;
+}
+

@@ -17,90 +17,118 @@ const EDUPLAY_HEADER_TEXT = '#f8fafc'; // Slate 50
 const EDUPLAY_HEADER_FONT_SIZE = 10;
 const EDUPLAY_FONT_FAMILY = 'Arial';
 
-// Danh mục 18 Bảng dữ liệu chuẩn của hệ sinh thái EDUPLAY (Team-Only)
+// Danh mục 20 Bảng dữ liệu chuẩn của hệ sinh thái EDUPLAY (Multi-User Teacher Workspaces)
 const EDUPLAY_SCHEMAS = {
+  // 1. User & Account Profile (Firebase Authentication Google Sign-in)
+  USERS: [
+    'id', 'authUid', 'email', 'displayName', 'photoURL', 'role', 'enabled', 'createdAt', 'lastLoginAt', 'updatedAt'
+  ],
+  // 2. Personal Teacher Preferences & Workspace Settings
+  USER_PREFERENCES: [
+    'id', 'authUid', 'defaultSchoolName', 'defaultClassName', 'defaultSubject', 'defaultGrade',
+    'defaultQuestionCount', 'defaultTeamCount', 'soundEnabled', 'animationEnabled', 'theme',
+    'favoriteGameSlug', 'lastQuestionBankId', 'createdAt', 'updatedAt'
+  ],
+  // 3. Global System Settings
   SETTINGS: [
     'key', 'value', 'category', 'description', 'updatedAt'
   ],
+  // 4. Global Games Catalog
   GAME_CATALOG: [
     'id', 'slug', 'name', 'description', 'category', 'minTeams', 'maxTeams',
     'supportsQuestions', 'supportsCamera', 'supportsScore', 'supportsCertificate',
     'enabled', 'featured', 'sortOrder', 'createdAt', 'updatedAt'
   ],
+  // 5. Classes Management
   CLASSES: [
-    'id', 'classCode', 'className', 'grade', 'schoolYear', 'teacherName',
+    'id', 'ownerUid', 'classCode', 'className', 'grade', 'schoolYear', 'teacherName',
     'schoolName', 'subject', 'enabled', 'createdAt', 'updatedAt'
   ],
+  // 6. Question Banks (System & Private)
   QUESTION_BANKS: [
-    'id', 'bankCode', 'name', 'subject', 'grade', 'topic', 'description',
+    'id', 'bankCode', 'ownerUid', 'visibility', 'name', 'subject', 'grade', 'topic', 'description',
     'questionCount', 'enabled', 'importId', 'sourceFileName', 'createdAt', 'updatedAt'
   ],
+  // 7. Questions (Strict Bank Ownership Inheritance)
   QUESTIONS: [
-    'id', 'bankId', 'order', 'subject', 'grade', 'topic', 'questionType',
+    'id', 'bankId', 'ownerUid', 'order', 'subject', 'grade', 'topic', 'questionType',
     'question', 'optionA', 'optionB', 'optionC', 'optionD', 'correctAnswer',
     'explanation', 'difficulty', 'normalPoints', 'specialPoints', 'isSpecial',
     'enabled', 'tags', 'importId', 'createdAt', 'updatedAt'
   ],
+  // 8. Game Sessions
   GAME_SESSIONS: [
-    'id', 'sessionCode', 'gameId', 'gameSlug', 'activityName', 'classId',
+    'id', 'sessionCode', 'ownerUid', 'gameId', 'gameSlug', 'activityName', 'classId',
     'className', 'teacherName', 'schoolName', 'subject', 'grade', 'questionBankId',
     'teamCount', 'status', 'currentRound', 'currentQuestion', 'totalQuestions',
     'winnerTeamId', 'winnerTeamName', 'startedAt', 'finishedAt', 'createdAt', 'updatedAt'
   ],
+  // 9. Teams (2-4 Teams)
   TEAMS: [
-    'id', 'sessionId', 'teamCode', 'teamName', 'teamColor', 'markerColor',
+    'id', 'sessionId', 'ownerUid', 'teamCode', 'teamName', 'teamColor', 'markerColor',
     'score', 'rank', 'correctAnswers', 'wrongAnswers', 'stealWins',
     'bonusPoints', 'penaltyPoints', 'specialCorrect', 'createdAt', 'updatedAt'
   ],
+  // 10. Score Events
   SCORE_EVENTS: [
-    'id', 'sessionId', 'gameSlug', 'roundNumber', 'questionId', 'teamId',
+    'id', 'sessionId', 'ownerUid', 'gameSlug', 'roundNumber', 'questionId', 'teamId',
     'teamCode', 'eventType', 'points', 'eventKey', 'note', 'createdAt'
   ],
+  // 11. Game Results
   GAME_RESULTS: [
-    'id', 'sessionId', 'gameSlug', 'teamId', 'teamCode', 'teamName', 'teamColor',
+    'id', 'sessionId', 'ownerUid', 'gameSlug', 'teamId', 'teamCode', 'teamName', 'teamColor',
     'finalScore', 'rank', 'correctAnswers', 'wrongAnswers', 'stealWins',
     'bonusPoints', 'penaltyPoints', 'specialCorrect', 'winner', 'statsJson', 'createdAt'
   ],
+  // 12. Cam Race Results
   CAM_RACE_RESULTS: [
-    'id', 'sessionId', 'questionId', 'questionOrder', 'winnerTeamId', 'winnerTeamCode',
+    'id', 'sessionId', 'ownerUid', 'questionId', 'questionOrder', 'winnerTeamId', 'winnerTeamCode',
     'blueDetectedAt', 'orangeDetectedAt', 'timeDifferenceMs', 'isTie', 'isFalseStart',
     'detectionMethod', 'blueMarkerConfidence', 'orangeMarkerConfidence', 'firstAnswer',
     'firstAnswerCorrect', 'stealTeamId', 'stealAnswer', 'stealCorrect', 'pointsAwarded', 'playedAt'
   ],
+  // 13. Smile Race Results
   SMILE_RACE_RESULTS: [
-    'id', 'sessionId', 'questionId', 'questionOrder', 'winnerTeamId', 'winnerTeamCode',
+    'id', 'sessionId', 'ownerUid', 'questionId', 'questionOrder', 'winnerTeamId', 'winnerTeamCode',
     'winnerTeamName', 'gestureTimestamp', 'gestureScore', 'markerConfidence',
     'stableFrames', 'isTie', 'detectionMethod', 'firstAnswer', 'firstAnswerCorrect',
     'stealTeamId', 'stealTeamCode', 'stealAnswer', 'stealCorrect', 'fullPoints',
     'stealPoints', 'pointsAwarded', 'playedAt'
   ],
+  // 14. Fastest Hand Results
   FASTEST_HAND_RESULTS: [
-    'id', 'sessionId', 'roundNumber', 'questionId', 'winnerTeamId', 'winnerTeamCode',
+    'id', 'sessionId', 'ownerUid', 'roundNumber', 'questionId', 'winnerTeamId', 'winnerTeamCode',
     'buzzTimestamp', 'responseTimeMs', 'answer', 'isCorrect', 'pointsAwarded', 'playedAt'
   ],
+  // 15. Lucky Wheel History
   LUCKY_WHEEL_HISTORY: [
-    'id', 'sessionId', 'spinNumber', 'wheelType', 'selectedTeamId',
+    'id', 'sessionId', 'ownerUid', 'spinNumber', 'wheelType', 'selectedTeamId',
     'selectedTeamName', 'selectedValue', 'reward', 'points', 'createdAt'
   ],
+  // 16. Random Team Picker History
   RANDOM_TEAM_HISTORY: [
-    'id', 'sessionId', 'pickNumber', 'pickType', 'selectedTeamId',
+    'id', 'sessionId', 'ownerUid', 'pickNumber', 'pickType', 'selectedTeamId',
     'selectedTeamName', 'selectedValue', 'excludedAfterPick', 'pickedAt'
   ],
+  // 17. Team Challenge Results
   TEAM_CHALLENGE_RESULTS: [
-    'id', 'sessionId', 'roundNumber', 'questionId', 'teamId', 'teamCode',
+    'id', 'sessionId', 'ownerUid', 'roundNumber', 'questionId', 'teamId', 'teamCode',
     'answer', 'isCorrect', 'eventType', 'pointsAwarded', 'createdAt'
   ],
+  // 18. Certificates
   CERTIFICATES: [
-    'id', 'sessionId', 'gameSlug', 'teamId', 'teamCode', 'teamName',
+    'id', 'sessionId', 'ownerUid', 'gameSlug', 'teamId', 'teamCode', 'teamName',
     'awardTitle', 'finalScore', 'rank', 'teacherName', 'className',
     'schoolName', 'certificateCode', 'issuedAt'
   ],
+  // 19. Import History
   IMPORT_HISTORY: [
-    'id', 'importId', 'importType', 'fileName', 'fileType', 'targetBankId', 'totalRows',
+    'id', 'importId', 'ownerUid', 'importType', 'fileName', 'fileType', 'targetBankId', 'totalRows',
     'createdRows', 'updatedRows', 'skippedRows', 'errorRows', 'mode', 'status', 'errorMessage', 'createdAt', 'completedAt'
   ],
+  // 20. Application Logs (Privacy-Safe)
   APP_LOGS: [
-    'id', 'level', 'module', 'action', 'message', 'sessionId', 'payload', 'createdAt'
+    'id', 'ownerUid', 'level', 'module', 'action', 'message', 'sessionId', 'payload', 'createdAt'
   ]
 };
 
@@ -112,11 +140,17 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('🎓 EDUPLAY')
     .addItem('⚙️ Setup / Update Database', 'setupDatabase')
+    .addItem('👤 Setup Multi-user Schema', 'setupMultiUserSchema')
+    .addItem('🔄 Migrate Multi-user Data', 'migrateMultiUserSchema')
+    .addSeparator()
+    .addItem('🛠 Repair Question Ownership', 'repairQuestionOwnership')
+    .addItem('🛠 Repair Session Ownership', 'repairSessionChildOwnership')
+    .addItem('🔍 Audit Ownership', 'auditOwnership')
+    .addSeparator()
+    .addItem('📊 Database Summary', 'showDatabaseSummary')
     .addSeparator()
     .addItem('📝 Seed 15 Questions', 'menuSeedQuestions')
     .addItem('🧪 Test Question Persistence', 'testQuestionBankPersistence')
-    .addItem('📊 Database Summary', 'showDatabaseSummary')
-    .addSeparator()
     .addItem('🔧 Đồng bộ số lượng câu (Repair Counts)', 'repairQuestionBankCounts')
     .addItem('🔍 Kiểm tra câu hỏi lạc (Find Orphans)', 'menuFindOrphans')
     .addSeparator()
@@ -145,6 +179,59 @@ function menuFindOrphans() {
     ui.alert('TẤT CẢ CÂU HỎI HỢP LỆ', 'Không phát hiện câu hỏi nào bị mồ côi (tất cả đều có bankId hợp lệ).', ui.ButtonSet.OK);
   } else {
     ui.alert('PHÁT HIỆN CÂU HỎI MỒ CÔI', `Có ${result.orphanCount} câu hỏi không có bankId hợp lệ trong hệ thống. Vui lòng kiểm tra chi tiết trong APP_LOGS.`, ui.ButtonSet.OK);
+  }
+}
+
+function setupMultiUserSchema() {
+  const result = apiSetupMultiUserSchema();
+  try {
+    SpreadsheetApp.getUi().alert('👤 SETUP MULTI-USER SCHEMA', result.message || 'Đã khởi tạo xong schema Multi-user!', SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    Logger.log(result.message);
+  }
+}
+
+function migrateMultiUserSchema() {
+  const result = apiMigrateMultiUserSchema();
+  try {
+    SpreadsheetApp.getUi().alert('🔄 MIGRATE MULTI-USER DATA', result.message || 'Đã di trú xong dữ liệu Multi-user!', SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    Logger.log(result.message);
+  }
+}
+
+function repairQuestionOwnership() {
+  const result = apiRepairQuestionOwnership();
+  try {
+    SpreadsheetApp.getUi().alert('🛠 REPAIR QUESTION OWNERSHIP', result.message || 'Đã chuẩn hóa quyền sở hữu câu hỏi!', SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    Logger.log(result.message);
+  }
+}
+
+function repairSessionChildOwnership() {
+  const result = apiRepairSessionChildOwnership();
+  try {
+    SpreadsheetApp.getUi().alert('🛠 REPAIR SESSION OWNERSHIP', result.message || 'Đã chuẩn hóa quyền sở hữu dữ liệu con của phiên chơi!', SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    Logger.log(result.message);
+  }
+}
+
+function auditOwnership() {
+  const result = apiAuditOwnership();
+  const d = result.data || {};
+  const msg = '📊 KẾT QUẢ KIỂM TRA QUYỀN SỞ HỮU (AUDIT):\n\n' +
+    '• Tổng số giáo viên (Users): ' + (d.totalUsers || 0) + '\n' +
+    '• Tổng số ngân hàng câu hỏi: ' + (d.totalBanks || 0) + '\n' +
+    '  - Ngân hàng mặc định (Hệ thống): ' + (d.systemBanks || 0) + '\n' +
+    '  - Ngân hàng riêng của giáo viên: ' + (d.teacherBanks || 0) + '\n' +
+    '• Câu hỏi lệch / mồ côi quyền sở hữu: ' + (d.orphanedQuestions || 0) + '\n' +
+    '• Dữ liệu phiên chơi lệch quyền sở hữu: ' + (d.orphanedSessionChildRecords || 0) + '\n';
+  try {
+    SpreadsheetApp.getUi().alert('🔍 AUDIT OWNERSHIP', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    Logger.log(msg);
   }
 }
 
@@ -344,7 +431,27 @@ const API_ACTIONS = {
   'certificates.get': apiGetCertificate,
 
   // 18. Logs
-  'appLogs.list': apiListAppLogs
+  'appLogs.list': apiListAppLogs,
+
+  // 19. Multi-User Teacher Profile & Workspace Preferences
+  'user.syncProfile': apiSyncUserProfile,
+  'user.get': apiGetUser,
+  'user.getPreferences': apiGetUserPreferences,
+  'user.updatePreferences': apiUpdateUserPreferences,
+
+  // 20. Multi-User Ownership Scoped Queries
+  'questionBanks.listForUser': apiListQuestionBanksForUser,
+  'questions.listByBankForUser': apiListQuestionsByBankForUser,
+  'sessions.listForUser': apiListSessionsForUser,
+  'results.listForUser': apiListResultsForUser,
+  'certificates.listForUser': apiListCertificatesForUser,
+
+  // 21. Multi-User Schema, Migration & Ownership Audit
+  'database.setupMultiUser': apiSetupMultiUserSchema,
+  'database.migrateMultiUser': apiMigrateMultiUserSchema,
+  'database.auditOwnership': apiAuditOwnership,
+  'database.repairQuestionOwnership': apiRepairQuestionOwnership,
+  'database.repairSessionOwnership': apiRepairSessionChildOwnership
 };
 
 function handleApiRequest(action, data) {
@@ -353,10 +460,19 @@ function handleApiRequest(action, data) {
   }
 
   try {
+    const payload = data || {};
+    // Extract teacher authenticatedUid from payload (authUid or authenticatedUid)
+    const authenticatedUid = payload.authUid ? String(payload.authUid).trim() : (payload.authenticatedUid ? String(payload.authenticatedUid).trim() : '');
+
+    // Nếu có authenticatedUid, kiểm tra xem tài khoản có bị vô hiệu hóa không (ngoại trừ action đăng nhập/đồng bộ profile)
+    if (authenticatedUid && action !== 'user.syncProfile') {
+      assertUserEnabled(authenticatedUid);
+    }
+
     const handler = API_ACTIONS[action];
-    return handler(data || {});
+    return handler(payload, authenticatedUid);
   } catch (err) {
-    appendLog('ERROR', 'API', action, err.message || err.toString(), (data && data.sessionId) || '', data);
+    appendLog('ERROR', 'API', action, err.message || err.toString(), (data && data.sessionId) || '', data, (data && data.authUid) || '');
     return errorResponse('EXECUTION_ERROR', `Lỗi khi thực thi action '${action}': ${err.message}`);
   }
 }
@@ -444,11 +560,42 @@ function findRowsByField(sheet, field, value) {
   return results;
 }
 
+function getSessionOwnerUid(sessionId) {
+  if (!sessionId) return '';
+  try {
+    const sessionSheet = getSheet('GAME_SESSIONS');
+    const s = findRowById(sessionSheet, sessionId);
+    if (s && s.data && s.data.ownerUid) {
+      return String(s.data.ownerUid).trim();
+    }
+  } catch (e) {}
+  return '';
+}
+
+function getBankOwnerUid(bankId) {
+  if (!bankId) return '';
+  try {
+    const bankSheet = getSheet('QUESTION_BANKS');
+    const b = findRowById(bankSheet, bankId);
+    if (b && b.data && b.data.ownerUid) {
+      return String(b.data.ownerUid).trim();
+    }
+  } catch (e) {}
+  return '';
+}
+
 function appendObject(sheet, obj) {
   const headers = getHeaders(sheet);
   if (!obj.id) {
     const prefix = sheet.getName().toLowerCase().replace(/_/g, '').substring(0, 5);
     obj.id = generateId(prefix);
+  }
+  if (headers.includes('ownerUid') && !obj.ownerUid) {
+    if (obj.sessionId) {
+      obj.ownerUid = getSessionOwnerUid(obj.sessionId);
+    } else if (obj.bankId) {
+      obj.ownerUid = getBankOwnerUid(obj.bankId);
+    }
   }
   if (headers.includes('createdAt') && !obj.createdAt) {
     obj.createdAt = getCurrentTimestamp();
@@ -493,6 +640,56 @@ function requireFields(data, fields) {
       throw new Error(`Trường bắt buộc còn thiếu: '${f}'`);
     }
   }
+}
+
+function getUserRole(authUid) {
+  if (!authUid) return 'TEACHER';
+  try {
+    const userSheet = getSheet('USERS');
+    const rows = findRowsByField(userSheet, 'authUid', authUid);
+    if (rows && rows.length > 0) {
+      return rows[0].data.role || 'TEACHER';
+    }
+  } catch (e) {}
+  return 'TEACHER';
+}
+
+function assertUserEnabled(authUid) {
+  if (!authUid) return;
+  try {
+    const userSheet = getSheet('USERS');
+    const rows = findRowsByField(userSheet, 'authUid', authUid);
+    if (rows && rows.length > 0) {
+      const user = rows[0].data;
+      const isEnabled = user.enabled !== undefined ? normalizeBoolean(user.enabled, true) : true;
+      const status = user.status ? String(user.status).toUpperCase() : (isEnabled ? 'ACTIVE' : 'DISABLED');
+      if (!isEnabled || status === 'DISABLED') {
+        throw new Error('Tài khoản giáo viên đã bị vô hiệu hóa bởi Quản trị viên.');
+      }
+    }
+  } catch (e) {
+    if (e.message && e.message.includes('vô hiệu hóa')) throw e;
+  }
+}
+
+function assertOwnership(resourceOwnerUid, callerUid, allowShared, visibility) {
+  if (!callerUid) return; // Legacy anonymous call or dev mode
+  const role = getUserRole(callerUid);
+  if (role === 'ADMIN') return; // Admin has full access
+
+  const rOwner = resourceOwnerUid ? String(resourceOwnerUid).trim() : '';
+  const cUid = String(callerUid).trim();
+
+  // If resource has no owner, it's public/system
+  if (!rOwner) return;
+
+  // Exact owner match
+  if (rOwner === cUid) return;
+
+  // If shared/public read is allowed
+  if (allowShared && (visibility === 'SHARED' || visibility === 'SYSTEM')) return;
+
+  throw new Error('FORBIDDEN: Bạn không có quyền truy cập hoặc chỉnh sửa tài nguyên của giáo viên khác.');
 }
 
 // ==========================================
@@ -716,9 +913,14 @@ function createQuestionBank(data) {
     ? sanitizeString(data.bankCode)
     : generateBankCode(subject, grade);
 
+  const ownerUid = data && data.ownerUid ? String(data.ownerUid).trim() : '';
+  const visibility = ownerUid ? (data.visibility === 'SHARED' ? 'SHARED' : 'PRIVATE') : (data.visibility || 'SYSTEM');
+
   const bank = {
     id: id,
     bankCode: bankCode,
+    ownerUid: ownerUid,
+    visibility: visibility,
     name: sanitizeString(data.name),
     subject: subject,
     grade: grade,
@@ -736,8 +938,10 @@ function createQuestionBank(data) {
   appendLog('INFO', 'QUESTION_BANK', 'QUESTION_BANK_CREATED', `Tạo mới ngân hàng câu hỏi: ${bank.name} (${bank.id})`, '', {
     bankId: bank.id,
     bankCode: bank.bankCode,
-    name: bank.name
-  });
+    name: bank.name,
+    ownerUid: bank.ownerUid,
+    visibility: bank.visibility
+  }, '', ownerUid);
 
   return bank;
 }
@@ -802,42 +1006,65 @@ function apiGetQuestionBank(data) {
   return successResponse(found.data);
 }
 
-function apiCreateQuestionBank(data) {
+function apiCreateQuestionBank(data, authenticatedUid) {
   try {
-    const bank = createQuestionBank(data);
+    const payload = { ...data };
+    if (authenticatedUid) {
+      payload.ownerUid = authenticatedUid;
+      payload.visibility = payload.visibility === 'SHARED' ? 'SHARED' : 'PRIVATE';
+    } else {
+      payload.ownerUid = '';
+      payload.visibility = 'SYSTEM';
+    }
+    const bank = createQuestionBank(payload);
     return successResponse(bank, 'Đã tạo ngân hàng câu hỏi mới');
   } catch (err) {
     return errorResponse('CREATE_BANK_FAILED', err.message);
   }
 }
 
-function apiUpdateQuestionBank(data) {
+function apiUpdateQuestionBank(data, authenticatedUid) {
   requireFields(data, ['id']);
   try {
+    const sheet = getSheet('QUESTION_BANKS');
+    const found = findRowById(sheet, data.id);
+    if (!found) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
+    if (authenticatedUid) {
+      assertOwnership(found.data.ownerUid, authenticatedUid, false, found.data.visibility);
+    }
     const updated = updateQuestionBank(data.id, data);
-    if (!updated) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
     return successResponse(updated, 'Đã cập nhật ngân hàng câu hỏi');
   } catch (err) {
     return errorResponse('UPDATE_BANK_FAILED', err.message);
   }
 }
 
-function apiDeleteQuestionBank(data) {
+function apiDeleteQuestionBank(data, authenticatedUid) {
   requireFields(data, ['id']);
+  const sheet = getSheet('QUESTION_BANKS');
+  const found = findRowById(sheet, data.id);
+  if (!found) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng để xóa');
+  if (authenticatedUid) {
+    assertOwnership(found.data.ownerUid, authenticatedUid, false, found.data.visibility);
+  }
   const disabled = disableQuestionBank(data.id);
-  if (!disabled) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng để xóa');
   return successResponse({ deleted: true, id: data.id }, 'Đã vô hiệu hóa ngân hàng câu hỏi');
 }
 
-function apiDisableQuestionBank(data) {
+function apiDisableQuestionBank(data, authenticatedUid) {
   requireFields(data, ['id']);
+  const sheet = getSheet('QUESTION_BANKS');
+  const found = findRowById(sheet, data.id);
+  if (!found) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
+  if (authenticatedUid) {
+    assertOwnership(found.data.ownerUid, authenticatedUid, false, found.data.visibility);
+  }
   const disabled = disableQuestionBank(data.id);
-  if (!disabled) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi');
   return successResponse(disabled, 'Đã vô hiệu hóa ngân hàng câu hỏi');
 }
 
-function apiSaveImportedQuestionBank(data) {
-  return saveImportedQuestionBank(data);
+function apiSaveImportedQuestionBank(data, authenticatedUid) {
+  return saveImportedQuestionBank(data, authenticatedUid);
 }
 
 // ==========================================
@@ -1014,6 +1241,18 @@ function importQuestionsBatch(bankId, rows, options) {
   const sheet = getSheet('QUESTIONS');
   const headers = getHeaders(sheet);
 
+  // Look up bank ownerUid if not explicitly provided in opts (Section 22: QUESTIONS.ownerUid = QUESTION_BANKS.ownerUid)
+  let bankOwnerUid = opts.ownerUid || '';
+  if (!bankOwnerUid) {
+    try {
+      const bankSheet = getSheet('QUESTION_BANKS');
+      const bRow = findRowById(bankSheet, bankId);
+      if (bRow && bRow.data && bRow.data.ownerUid) {
+        bankOwnerUid = String(bRow.data.ownerUid).trim();
+      }
+    } catch (e) {}
+  }
+
   // Load existing questions for this bank for duplicate checking
   const existingMap = new Map();
   const existingIdMap = new Map();
@@ -1138,6 +1377,7 @@ function importQuestionsBatch(bankId, rows, options) {
         } else if (mode === 'UPDATE') {
           const updateObj = {
             bankId: bankId, // Server enforces bankId!
+            ownerUid: bankOwnerUid || matchedExisting.data.ownerUid || '',
             subject: sanitizeString(r.subject) || matchedExisting.data.subject || 'Tin học',
             grade: r.grade ? Number(r.grade) : (matchedExisting.data.grade || 5),
             topic: sanitizeString(r.topic) || matchedExisting.data.topic || '',
@@ -1170,6 +1410,7 @@ function importQuestionsBatch(bankId, rows, options) {
       const newQ = {
         id: generateId('q'),
         bankId: bankId, // Server enforces bankId!
+        ownerUid: bankOwnerUid,
         order: Number(r.order) > 0 ? Number(r.order) : currentMaxOrder,
         subject: sanitizeString(r.subject) || 'Tin học',
         grade: r.grade ? Number(r.grade) : 5,
@@ -1228,7 +1469,7 @@ function importQuestionsBatch(bankId, rows, options) {
   };
 }
 
-function saveImportedQuestionBank(payload) {
+function saveImportedQuestionBank(payload, authenticatedUid) {
   // 1. Validate payload
   if (!payload || typeof payload !== 'object') {
     return errorResponse('INVALID_PAYLOAD', 'Dữ liệu payload không hợp lệ.');
@@ -1239,6 +1480,10 @@ function saveImportedQuestionBank(payload) {
   const importInfo = payload.import || {};
   const importId = sanitizeString(importInfo.importId);
   const mode = (importInfo.mode || 'CREATE').toUpperCase();
+
+  // Enforce server-side ownerUid: ignore client-provided spoofed ownerUid
+  const safeOwnerUid = authenticatedUid ? String(authenticatedUid).trim() : '';
+  const safeVisibility = safeOwnerUid ? (bankData.visibility === 'SHARED' ? 'SHARED' : 'PRIVATE') : 'SYSTEM';
 
   if (!bankData.name || !String(bankData.name).trim()) {
     return errorResponse('MISSING_BANK_NAME', 'Tên bộ câu hỏi (bank.name) là bắt buộc.');
@@ -1348,16 +1593,19 @@ function saveImportedQuestionBank(payload) {
       topic: bankData.topic,
       description: bankData.description,
       sourceFileName: importInfo.fileName,
-      importId: importId
+      importId: importId,
+      ownerUid: safeOwnerUid,
+      visibility: safeVisibility
     });
 
     const bankId = createdBank.id;
 
-    // 2. Import Batch Questions (enforces question.bankId = bankId)
+    // 2. Import Batch Questions (enforces question.bankId = bankId and question.ownerUid = bank.ownerUid)
     const batchResult = importQuestionsBatch(bankId, rawQuestions, {
       mode: mode,
       importId: importId,
-      sourceFileName: importInfo.fileName
+      sourceFileName: importInfo.fileName,
+      ownerUid: safeOwnerUid
     });
 
     // 3. Recalculate exact question count from QUESTIONS sheet
@@ -1381,6 +1629,7 @@ function saveImportedQuestionBank(payload) {
       appendObject(historySheet, {
         id: historyId,
         importId: importId,
+        ownerUid: safeOwnerUid,
         importType: 'QUESTIONS',
         fileName: importInfo.fileName || 'web_import.json',
         fileType: importInfo.fileType || 'JSON',
@@ -1397,7 +1646,7 @@ function saveImportedQuestionBank(payload) {
         completedAt: getCurrentTimestamp()
       });
 
-      appendLog('ERROR', 'IMPORT', 'QUESTIONS_IMPORT_FAILED', `Import thất bại toàn bộ cho bank '${bankData.name}' (${bankId})`, '', batchResult);
+      appendLog('ERROR', 'IMPORT', 'QUESTIONS_IMPORT_FAILED', `Import thất bại toàn bộ cho bank '${bankData.name}' (${bankId})`, '', batchResult, '', safeOwnerUid);
 
       return {
         success: false,
@@ -1421,6 +1670,7 @@ function saveImportedQuestionBank(payload) {
     appendObject(historySheet, {
       id: historyId,
       importId: importId,
+      ownerUid: safeOwnerUid,
       importType: 'QUESTIONS',
       fileName: importInfo.fileName || 'web_import.json',
       fileType: importInfo.fileType || 'JSON',
@@ -1560,9 +1810,12 @@ function apiListImportHistory() {
 // 12. API HANDLERS - GAME SESSIONS
 // ==========================================
 
-function apiCreateSession(data) {
+function apiCreateSession(data, authenticatedUid) {
   requireFields(data, ['gameSlug']);
   const gameSlug = data.gameSlug;
+
+  // Server enforces ownerUid: never trust client-provided ownerUid
+  const safeOwnerUid = authenticatedUid ? String(authenticatedUid).trim() : '';
 
   // 1. Kiểm tra game tồn tại
   const catalogSheet = getSheet('GAME_CATALOG');
@@ -1588,6 +1841,7 @@ function apiCreateSession(data) {
   const sessionObj = {
     id: sessionId,
     sessionCode: sessionCode,
+    ownerUid: safeOwnerUid,
     gameId: gameInfo.id || `game_${gameSlug}`,
     gameSlug: gameSlug,
     activityName: sanitizeString(data.activityName) || `${gameInfo.name} - Trận đấu mới`,
@@ -1638,6 +1892,7 @@ function apiCreateSession(data) {
     const t = {
       id: generateId('team'),
       sessionId: sessionId,
+      ownerUid: safeOwnerUid,
       teamCode: code,
       teamName: name,
       teamColor: color,
@@ -1657,8 +1912,9 @@ function apiCreateSession(data) {
 
   appendLog('INFO', 'SYSTEM', 'SESSION_CREATED', `Khởi tạo trận ${gameSlug} (${teamCount} đội) - Code: ${sessionCode}`, sessionId, {
     gameSlug: gameSlug,
-    teamCount: teamCount
-  });
+    teamCount: teamCount,
+    ownerUid: safeOwnerUid
+  }, safeOwnerUid);
 
   return successResponse({
     ...sessionObj,
@@ -2794,7 +3050,484 @@ function apiListAppLogs(data) {
 }
 
 // ==========================================
-// 24. CORE SETUP DATABASE & MIGRATION
+// 24. MULTI-USER TEACHER PROFILE & PREFERENCES API
+// ==========================================
+
+function apiSyncUserProfile(data, authenticatedUid) {
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  if (!targetUid) {
+    return errorResponse('MISSING_AUTH_UID', 'authUid là bắt buộc để đồng bộ hồ sơ giáo viên.');
+  }
+
+  const userSheet = getSheet('USERS');
+  const prefSheet = getSheet('USER_PREFERENCES');
+
+  const existingUsers = findRowsByField(userSheet, 'authUid', targetUid);
+  let userRecord = null;
+
+  if (existingUsers.length > 0) {
+    const existing = existingUsers[0];
+    const updates = {
+      email: sanitizeString(data.email) || existing.data.email,
+      displayName: sanitizeString(data.displayName) || existing.data.displayName,
+      photoURL: sanitizeString(data.photoURL || data.photoUrl) || existing.data.photoURL || '',
+      lastLoginAt: getCurrentTimestamp(),
+      updatedAt: getCurrentTimestamp()
+    };
+    if (data.role && data.role === 'ADMIN' && existing.data.role === 'ADMIN') {
+      updates.role = 'ADMIN';
+    }
+    userRecord = updateObjectById(userSheet, existing.data.id, updates);
+  } else {
+    const newUser = {
+      id: generateId('usr'),
+      authUid: targetUid,
+      email: sanitizeString(data.email),
+      displayName: sanitizeString(data.displayName) || 'Giáo viên',
+      photoURL: sanitizeString(data.photoURL || data.photoUrl) || '',
+      role: data.role === 'ADMIN' ? 'ADMIN' : 'TEACHER',
+      enabled: true,
+      createdAt: getCurrentTimestamp(),
+      lastLoginAt: getCurrentTimestamp(),
+      updatedAt: getCurrentTimestamp()
+    };
+    userRecord = appendObject(userSheet, newUser);
+  }
+
+  // Synchronize Preferences
+  const existingPrefs = findRowsByField(prefSheet, 'authUid', targetUid);
+  let prefRecord = null;
+
+  if (existingPrefs.length > 0) {
+    prefRecord = existingPrefs[0].data;
+  } else {
+    const newPref = {
+      id: generateId('pref'),
+      authUid: targetUid,
+      defaultSchoolName: sanitizeString(data.schoolName) || '',
+      defaultClassName: sanitizeString(data.defaultClassName) || '5A',
+      defaultSubject: sanitizeString(data.defaultSubject) || 'Tin học',
+      defaultGrade: data.defaultGrade ? Number(data.defaultGrade) : 5,
+      defaultQuestionCount: 10,
+      defaultTeamCount: 2,
+      soundEnabled: true,
+      animationEnabled: true,
+      theme: 'LIGHT',
+      favoriteGameSlug: 'cam-race',
+      lastQuestionBankId: 'bank_tinhoc5_demo',
+      createdAt: getCurrentTimestamp(),
+      updatedAt: getCurrentTimestamp()
+    };
+    prefRecord = appendObject(prefSheet, newPref);
+  }
+
+  appendLog('INFO', 'AUTH', 'USER_SYNCED', `Đồng bộ tài khoản thành công: ${userRecord.displayName} (${targetUid})`, '', {
+    authUid: targetUid,
+    email: userRecord.email,
+    role: userRecord.role
+  }, targetUid);
+
+  return successResponse({
+    user: userRecord,
+    preferences: prefRecord
+  }, 'Đồng bộ tài khoản và cài đặt thành công');
+}
+
+function apiGetUser(data, authenticatedUid) {
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  if (!targetUid) return errorResponse('MISSING_AUTH_UID', 'authUid là bắt buộc.');
+  const userSheet = getSheet('USERS');
+  const rows = findRowsByField(userSheet, 'authUid', targetUid);
+  if (rows.length === 0) return errorResponse('USER_NOT_FOUND', 'Không tìm thấy thông tin giáo viên.');
+  return successResponse(rows[0].data);
+}
+
+function apiGetUserPreferences(data, authenticatedUid) {
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  if (!targetUid) return errorResponse('MISSING_AUTH_UID', 'authUid là bắt buộc.');
+  const prefSheet = getSheet('USER_PREFERENCES');
+  const rows = findRowsByField(prefSheet, 'authUid', targetUid);
+  if (rows.length === 0) {
+    return successResponse({
+      authUid: targetUid,
+      defaultSchoolName: '',
+      defaultClassName: '5A',
+      defaultSubject: 'Tin học',
+      defaultGrade: 5,
+      defaultQuestionCount: 10,
+      defaultTeamCount: 2,
+      soundEnabled: true,
+      animationEnabled: true,
+      theme: 'LIGHT',
+      favoriteGameSlug: 'cam-race'
+    });
+  }
+  return successResponse(rows[0].data);
+}
+
+function apiUpdateUserPreferences(data, authenticatedUid) {
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  if (!targetUid) return errorResponse('MISSING_AUTH_UID', 'authUid là bắt buộc.');
+  const prefSheet = getSheet('USER_PREFERENCES');
+  const rows = findRowsByField(prefSheet, 'authUid', targetUid);
+
+  const updates = { ...data };
+  delete updates.authUid;
+  delete updates.id;
+  updates.updatedAt = getCurrentTimestamp();
+
+  if (rows.length > 0) {
+    const updated = updateObjectById(prefSheet, rows[0].data.id, updates);
+    return successResponse(updated, 'Đã lưu cấu hình không gian làm việc.');
+  } else {
+    const newPref = {
+      id: generateId('pref'),
+      authUid: targetUid,
+      ...updates,
+      createdAt: getCurrentTimestamp(),
+      updatedAt: getCurrentTimestamp()
+    };
+    appendObject(prefSheet, newPref);
+    return successResponse(newPref, 'Đã khởi tạo và lưu cấu hình không gian làm việc.');
+  }
+}
+
+// ==========================================
+// 25. MULTI-USER SCOPED QUERIES
+// ==========================================
+
+function apiListQuestionBanksForUser(data, authenticatedUid) {
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const lastRow = bankSheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+
+  const headers = getHeaders(bankSheet);
+  const dataRows = bankSheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const role = getUserRole(targetUid);
+
+  const banks = dataRows
+    .map(row => rowToObject(headers, row))
+    .filter(b => {
+      const isEnabled = b.enabled !== undefined ? normalizeBoolean(b.enabled, true) : true;
+      if (!isEnabled) return false;
+      if (role === 'ADMIN') return true;
+      if (!targetUid) return !b.ownerUid || b.visibility === 'SYSTEM' || b.visibility === 'SHARED';
+      return b.ownerUid === targetUid || !b.ownerUid || b.visibility === 'SYSTEM' || b.visibility === 'SHARED';
+    })
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+  return successResponse(banks);
+}
+
+function apiListQuestionsByBankForUser(data, authenticatedUid) {
+  requireFields(data, ['bankId']);
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  const bankSheet = getSheet('QUESTION_BANKS');
+  const bFound = findRowById(bankSheet, data.bankId);
+  if (!bFound) return errorResponse('BANK_NOT_FOUND', 'Không tìm thấy ngân hàng câu hỏi.');
+
+  // Check read permission
+  assertOwnership(bFound.data.ownerUid, targetUid, true, bFound.data.visibility);
+
+  return apiListQuestionsByBank(data);
+}
+
+function apiListSessionsForUser(data, authenticatedUid) {
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  const sessionSheet = getSheet('GAME_SESSIONS');
+  const lastRow = sessionSheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+
+  const headers = getHeaders(sessionSheet);
+  const rows = sessionSheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const role = getUserRole(targetUid);
+
+  let sessions = rows
+    .map(r => rowToObject(headers, r))
+    .filter(s => {
+      if (role === 'ADMIN') return true;
+      if (!targetUid) return true; // Cho phép chế độ xem demo
+      return s.ownerUid === targetUid;
+    })
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+  if (data.gameSlug) {
+    sessions = sessions.filter(s => s.gameSlug === data.gameSlug);
+  }
+  if (data.limit) {
+    sessions = sessions.slice(0, Number(data.limit));
+  }
+
+  return successResponse(sessions);
+}
+
+function apiListResultsForUser(data, authenticatedUid) {
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  const resultSheet = getSheet('GAME_RESULTS');
+  const lastRow = resultSheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+
+  const headers = getHeaders(resultSheet);
+  const rows = resultSheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const role = getUserRole(targetUid);
+
+  let results = rows
+    .map(r => rowToObject(headers, r))
+    .filter(r => {
+      if (role === 'ADMIN') return true;
+      if (!targetUid) return true;
+      return r.ownerUid === targetUid;
+    })
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+  if (data.gameSlug) {
+    results = results.filter(r => r.gameSlug === data.gameSlug);
+  }
+
+  return successResponse(results);
+}
+
+function apiListCertificatesForUser(data, authenticatedUid) {
+  const targetUid = String(authenticatedUid || data.authUid || '').trim();
+  const certSheet = getSheet('CERTIFICATES');
+  const lastRow = certSheet.getLastRow();
+  if (lastRow <= 1) return successResponse([]);
+
+  const headers = getHeaders(certSheet);
+  const rows = certSheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const role = getUserRole(targetUid);
+
+  let certs = rows
+    .map(r => rowToObject(headers, r))
+    .filter(c => {
+      if (role === 'ADMIN') return true;
+      if (!targetUid) return true;
+      return c.ownerUid === targetUid;
+    })
+    .sort((a, b) => new Date(b.issuedAt || 0).getTime() - new Date(a.issuedAt || 0).getTime());
+
+  return successResponse(certs);
+}
+
+// ==========================================
+// 26. MULTI-USER SCHEMA SETUP, MIGRATION & AUDIT
+// ==========================================
+
+function apiSetupMultiUserSchema(data, authenticatedUid) {
+  setupDatabase();
+  return successResponse({
+    schemas: Object.keys(EDUPLAY_SCHEMAS),
+    totalSheets: Object.keys(EDUPLAY_SCHEMAS).length
+  }, 'Đã khởi tạo hoàn tất toàn bộ 20 bảng cơ sở dữ liệu Multi-User EDUPLAY.');
+}
+
+function apiMigrateMultiUserSchema(data, authenticatedUid) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const migrationLogs = [];
+  let updatedColsTotal = 0;
+
+  Object.keys(EDUPLAY_SCHEMAS).forEach(sheetName => {
+    const expectedHeaders = EDUPLAY_SCHEMAS[sheetName];
+    const sheet = getOrCreateSheet(ss, sheetName, expectedHeaders);
+    const lastCol = Math.max(sheet.getLastColumn(), 1);
+    const currentHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+    const missing = expectedHeaders.filter(h => !currentHeaders.includes(h));
+
+    if (missing.length > 0) {
+      ensureHeaders(sheet, expectedHeaders);
+      formatSheetHeader(sheet, expectedHeaders.length);
+      migrationLogs.push(`Bảng ${sheetName}: đã bổ sung các cột [${missing.join(', ')}]`);
+      updatedColsTotal += missing.length;
+    }
+  });
+
+  ensureDataValidation(ss);
+  appendLog('INFO', 'MIGRATION', 'MULTI_USER_MIGRATION_DONE', `Đã đồng bộ schema Multi-User (${updatedColsTotal} cột bổ sung)`, '', migrationLogs, authenticatedUid || '');
+
+  return successResponse({
+    updatedColumnsCount: updatedColsTotal,
+    details: migrationLogs
+  }, `Đã di trú schema Multi-User thành công (${updatedColsTotal} cột mới).`);
+}
+
+function apiAuditOwnership(data, authenticatedUid) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const stats = {
+    totalUsers: 0,
+    totalBanks: 0,
+    systemBanks: 0,
+    teacherBanks: 0,
+    orphanedQuestions: 0,
+    orphanedSessionChildRecords: 0
+  };
+
+  const userSheet = ss.getSheetByName('USERS');
+  if (userSheet && userSheet.getLastRow() > 1) {
+    stats.totalUsers = userSheet.getLastRow() - 1;
+  }
+
+  const bankSheet = ss.getSheetByName('QUESTION_BANKS');
+  const bankOwnerMap = new Map();
+  if (bankSheet && bankSheet.getLastRow() > 1) {
+    const bHeaders = getHeaders(bankSheet);
+    const bRows = bankSheet.getRange(2, 1, bankSheet.getLastRow() - 1, bHeaders.length).getValues();
+    stats.totalBanks = bRows.length;
+    bRows.forEach(r => {
+      const bObj = rowToObject(bHeaders, r);
+      bankOwnerMap.set(bObj.id, bObj.ownerUid || '');
+      if (!bObj.ownerUid || bObj.visibility === 'SYSTEM') {
+        stats.systemBanks++;
+      } else {
+        stats.teacherBanks++;
+      }
+    });
+  }
+
+  // Audit Questions
+  const qSheet = ss.getSheetByName('QUESTIONS');
+  if (qSheet && qSheet.getLastRow() > 1) {
+    const qHeaders = getHeaders(qSheet);
+    const qRows = qSheet.getRange(2, 1, qSheet.getLastRow() - 1, qHeaders.length).getValues();
+    qRows.forEach(r => {
+      const qObj = rowToObject(qHeaders, r);
+      const expectedOwner = bankOwnerMap.get(qObj.bankId) || '';
+      if ((qObj.ownerUid || '') !== expectedOwner) {
+        stats.orphanedQuestions++;
+      }
+    });
+  }
+
+  // Audit Sessions & Teams
+  const sessionSheet = ss.getSheetByName('GAME_SESSIONS');
+  const sessionOwnerMap = new Map();
+  if (sessionSheet && sessionSheet.getLastRow() > 1) {
+    const sHeaders = getHeaders(sessionSheet);
+    const sRows = sessionSheet.getRange(2, 1, sessionSheet.getLastRow() - 1, sHeaders.length).getValues();
+    sRows.forEach(r => {
+      const sObj = rowToObject(sHeaders, r);
+      sessionOwnerMap.set(sObj.id, sObj.ownerUid || '');
+    });
+  }
+
+  const childSheets = ['TEAMS', 'SCORE_EVENTS', 'GAME_RESULTS', 'CAM_RACE_RESULTS', 'SMILE_RACE_RESULTS', 'FASTEST_HAND_RESULTS', 'LUCKY_WHEEL_HISTORY', 'RANDOM_TEAM_HISTORY', 'TEAM_CHALLENGE_RESULTS', 'CERTIFICATES'];
+  childSheets.forEach(cName => {
+    const cSheet = ss.getSheetByName(cName);
+    if (cSheet && cSheet.getLastRow() > 1) {
+      const cHeaders = getHeaders(cSheet);
+      const cRows = cSheet.getRange(2, 1, cSheet.getLastRow() - 1, cHeaders.length).getValues();
+      cRows.forEach(r => {
+        const cObj = rowToObject(cHeaders, r);
+        const expectedOwner = sessionOwnerMap.get(cObj.sessionId) || '';
+        if ((cObj.ownerUid || '') !== expectedOwner) {
+          stats.orphanedSessionChildRecords++;
+        }
+      });
+    }
+  });
+
+  return successResponse(stats, 'Kiểm tra tính toàn vẹn quyền sở hữu (Multi-User Ownership Audit) thành công');
+}
+
+function apiRepairQuestionOwnership(data, authenticatedUid) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const bankSheet = ss.getSheetByName('QUESTION_BANKS');
+  const qSheet = ss.getSheetByName('QUESTIONS');
+  if (!bankSheet || !qSheet || qSheet.getLastRow() <= 1) {
+    return successResponse({ repairedCount: 0 }, 'Không có câu hỏi cần sửa');
+  }
+
+  const bHeaders = getHeaders(bankSheet);
+  const bRows = bankSheet.getRange(2, 1, bankSheet.getLastRow() - 1, bHeaders.length).getValues();
+  const bankOwnerMap = new Map();
+  bRows.forEach(r => {
+    const bObj = rowToObject(bHeaders, r);
+    bankOwnerMap.set(bObj.id, bObj.ownerUid || '');
+  });
+
+  const qHeaders = getHeaders(qSheet);
+  const ownerColIdx = qHeaders.indexOf('ownerUid');
+  const bankIdColIdx = qHeaders.indexOf('bankId');
+  if (ownerColIdx === -1 || bankIdColIdx === -1) {
+    return errorResponse('SCHEMA_ERROR', 'Bảng QUESTIONS thiếu cột bankId hoặc ownerUid');
+  }
+
+  const qRange = qSheet.getRange(2, 1, qSheet.getLastRow() - 1, qHeaders.length);
+  const qRows = qRange.getValues();
+  let repairedCount = 0;
+
+  for (let i = 0; i < qRows.length; i++) {
+    const bankId = String(qRows[i][bankIdColIdx]);
+    const currentOwner = String(qRows[i][ownerColIdx] || '');
+    const expectedOwner = bankOwnerMap.get(bankId) || '';
+
+    if (currentOwner !== expectedOwner) {
+      qRows[i][ownerColIdx] = expectedOwner;
+      repairedCount++;
+    }
+  }
+
+  if (repairedCount > 0) {
+    qRange.setValues(qRows);
+  }
+
+  appendLog('INFO', 'REPAIR', 'QUESTIONS_OWNERSHIP_REPAIRED', `Đã khắc phục quyền sở hữu cho ${repairedCount} câu hỏi`, '', { repairedCount }, authenticatedUid || '');
+  return successResponse({ repairedCount }, `Đã sửa thành công quyền sở hữu cho ${repairedCount} câu hỏi.`);
+}
+
+function apiRepairSessionChildOwnership(data, authenticatedUid) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionSheet = ss.getSheetByName('GAME_SESSIONS');
+  if (!sessionSheet || sessionSheet.getLastRow() <= 1) {
+    return successResponse({ repairedCount: 0 }, 'Không có phiên chơi để sửa');
+  }
+
+  const sHeaders = getHeaders(sessionSheet);
+  const sRows = sessionSheet.getRange(2, 1, sessionSheet.getLastRow() - 1, sHeaders.length).getValues();
+  const sessionOwnerMap = new Map();
+  sRows.forEach(r => {
+    const sObj = rowToObject(sHeaders, r);
+    sessionOwnerMap.set(sObj.id, sObj.ownerUid || '');
+  });
+
+  const childSheets = ['TEAMS', 'SCORE_EVENTS', 'GAME_RESULTS', 'CAM_RACE_RESULTS', 'SMILE_RACE_RESULTS', 'FASTEST_HAND_RESULTS', 'LUCKY_WHEEL_HISTORY', 'RANDOM_TEAM_HISTORY', 'TEAM_CHALLENGE_RESULTS', 'CERTIFICATES'];
+  let totalRepaired = 0;
+
+  childSheets.forEach(cName => {
+    const cSheet = ss.getSheetByName(cName);
+    if (!cSheet || cSheet.getLastRow() <= 1) return;
+    const cHeaders = getHeaders(cSheet);
+    const ownerColIdx = cHeaders.indexOf('ownerUid');
+    const sessionColIdx = cHeaders.indexOf('sessionId');
+    if (ownerColIdx === -1 || sessionColIdx === -1) return;
+
+    const cRange = cSheet.getRange(2, 1, cSheet.getLastRow() - 1, cHeaders.length);
+    const cRows = cRange.getValues();
+    let sheetRepaired = 0;
+
+    for (let i = 0; i < cRows.length; i++) {
+      const sessionId = String(cRows[i][sessionColIdx]);
+      const currentOwner = String(cRows[i][ownerColIdx] || '');
+      const expectedOwner = sessionOwnerMap.get(sessionId) || '';
+
+      if (currentOwner !== expectedOwner) {
+        cRows[i][ownerColIdx] = expectedOwner;
+        sheetRepaired++;
+      }
+    }
+
+    if (sheetRepaired > 0) {
+      cRange.setValues(cRows);
+      totalRepaired += sheetRepaired;
+    }
+  });
+
+  appendLog('INFO', 'REPAIR', 'SESSIONS_CHILD_OWNERSHIP_REPAIRED', `Đã khắc phục quyền sở hữu cho ${totalRepaired} bản ghi con của phiên chơi`, '', { totalRepaired }, authenticatedUid || '');
+  return successResponse({ repairedCount: totalRepaired }, `Đã sửa thành công quyền sở hữu cho ${totalRepaired} bản ghi con.`);
+}
+
+// ==========================================
+// 27. CORE SETUP DATABASE & MIGRATION
 // ==========================================
 
 function setupDatabase() {
@@ -2986,23 +3719,80 @@ function generateCertificateCode() {
   return `EDUPLAY-2026-${num}`;
 }
 
-function appendLog(level, module, action, message, sessionId, payload) {
+function sanitizeLogPayload(payload) {
+  if (!payload) return '';
+  if (typeof payload === 'string') {
+    let sanitized = payload;
+    const sensitivePatterns = [
+      /idToken["':\s]+([^"',\s]+)/gi,
+      /accessToken["':\s]+([^"',\s]+)/gi,
+      /refreshToken["':\s]+([^"',\s]+)/gi,
+      /password["':\s]+([^"',\s]+)/gi,
+      /secret["':\s]+([^"',\s]+)/gi,
+      /bearer\s+[A-Za-z0-9-_.]+/gi
+    ];
+    sensitivePatterns.forEach(pattern => {
+      sanitized = sanitized.replace(pattern, '[REDACTED]');
+    });
+    return sanitized;
+  }
+  if (typeof payload === 'object') {
+    try {
+      const clone = JSON.parse(JSON.stringify(payload));
+      const redactKeys = ['idToken', 'accessToken', 'refreshToken', 'password', 'token', 'secret', 'apiKey', 'credential'];
+      function redactObject(obj) {
+        if (!obj || typeof obj !== 'object') return;
+        Object.keys(obj).forEach(k => {
+          if (redactKeys.includes(k) || redactKeys.some(rk => k.toLowerCase().includes(rk.toLowerCase()))) {
+            obj[k] = '[REDACTED]';
+          } else if (typeof obj[k] === 'object') {
+            redactObject(obj[k]);
+          }
+        });
+      }
+      redactObject(clone);
+      return JSON.stringify(clone);
+    } catch (e) {
+      return String(payload);
+    }
+  }
+  return String(payload);
+}
+
+function appendLog(level, module, action, message, sessionId, payload, ownerUid) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName('APP_LOGS');
     if (!sheet) return;
 
-    const row = [
-      generateId('log'),
-      level || 'INFO',
-      module || 'SYSTEM',
-      action || '',
-      message || '',
-      sessionId || '',
-      payload ? (typeof payload === 'string' ? payload : JSON.stringify(payload)) : '',
-      getCurrentTimestamp()
-    ];
-    sheet.appendRow(row);
+    const headers = getHeaders(sheet);
+    const logObj = {
+      id: generateId('log'),
+      ownerUid: ownerUid || '',
+      level: level || 'INFO',
+      module: module || 'SYSTEM',
+      action: action || '',
+      message: message || '',
+      sessionId: sessionId || '',
+      payload: sanitizeLogPayload(payload),
+      createdAt: getCurrentTimestamp()
+    };
+
+    if (headers && headers.length > 0) {
+      sheet.appendRow(objectToRow(headers, logObj));
+    } else {
+      sheet.appendRow([
+        logObj.id,
+        logObj.ownerUid,
+        logObj.level,
+        logObj.module,
+        logObj.action,
+        logObj.message,
+        logObj.sessionId,
+        logObj.payload,
+        logObj.createdAt
+      ]);
+    }
   } catch (e) {
     Logger.log('Không thể ghi log: ' + e.toString());
   }
@@ -3176,6 +3966,8 @@ function seedQuestionBanks(ss) {
   const defaultBank = {
     id: 'bank_tinhoc5_demo',
     bankCode: 'TINHOC5_DEMO',
+    ownerUid: '',
+    visibility: 'SYSTEM',
     name: 'Tin học lớp 5 – Bộ câu hỏi demo',
     subject: 'Tin học',
     grade: 5,
@@ -3449,6 +4241,7 @@ function seedQuestions(ss) {
       const qObj = {
         id: generateId('q'),
         bankId: bankId,
+        ownerUid: '',
         order: q.order,
         subject: 'Tin học',
         grade: 5,
@@ -3479,27 +4272,70 @@ function seedQuestions(ss) {
   }
 }
 
+function columnToLetter(column) {
+  let temp, letter = '';
+  let col = column;
+  while (col > 0) {
+    temp = (col - 1) % 26;
+    letter = String.fromCharCode(temp + 65) + letter;
+    col = Math.floor((col - temp - 1) / 26);
+  }
+  return letter;
+}
+
+function setListValidationByHeader(ss, sheetName, headerName, values) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return;
+  const headers = getHeaders(sheet);
+  const colIdx = headers.indexOf(headerName);
+  if (colIdx === -1) return;
+  const colLetter = columnToLetter(colIdx + 1);
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(values, true).setAllowInvalid(false).build();
+  sheet.getRange(`${colLetter}2:${colLetter}1000`).setDataValidation(rule);
+}
+
+function setBooleanValidationByHeader(ss, sheetName, headerNames) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return;
+  const headers = getHeaders(sheet);
+  const rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  headerNames.forEach(headerName => {
+    const colIdx = headers.indexOf(headerName);
+    if (colIdx !== -1) {
+      const colLetter = columnToLetter(colIdx + 1);
+      sheet.getRange(`${colLetter}2:${colLetter}1000`).setDataValidation(rule);
+    }
+  });
+}
+
 function ensureDataValidation(ss) {
   try {
-    setListValidation(ss, 'GAME_SESSIONS', 'M', ['2', '3', '4']);
-    setListValidation(ss, 'GAME_SESSIONS', 'N', ['READY', 'PLAYING', 'PAUSED', 'FINISHED', 'CANCELLED']);
+    setListValidationByHeader(ss, 'USERS', 'role', ['ADMIN', 'TEACHER']);
+    setListValidationByHeader(ss, 'USERS', 'status', ['ACTIVE', 'DISABLED']);
+    setBooleanValidationByHeader(ss, 'USERS', ['emailVerified']);
 
-    setListValidation(ss, 'QUESTIONS', 'G', ['multiple_choice', 'true_false', 'short_answer', 'fill_blank', 'sorting', 'drag_drop']);
-    setListValidation(ss, 'QUESTIONS', 'O', ['EASY', 'MEDIUM', 'HARD']);
-    setBooleanValidation(ss, 'QUESTIONS', ['R', 'S']);
+    setListValidationByHeader(ss, 'QUESTION_BANKS', 'visibility', ['PRIVATE', 'SHARED', 'SYSTEM']);
+    setBooleanValidationByHeader(ss, 'QUESTION_BANKS', ['enabled']);
 
-    setListValidation(ss, 'CAM_RACE_RESULTS', 'L', ['CAMERA', 'MANUAL']);
-    setListValidation(ss, 'SMILE_RACE_RESULTS', 'M', ['CAMERA', 'MANUAL']);
+    setListValidationByHeader(ss, 'GAME_SESSIONS', 'teamCount', ['2', '3', '4']);
+    setListValidationByHeader(ss, 'GAME_SESSIONS', 'status', ['READY', 'PLAYING', 'PAUSED', 'FINISHED', 'CANCELLED']);
 
-    setListValidation(ss, 'LUCKY_WHEEL_HISTORY', 'D', ['TEAM', 'QUESTION', 'REWARD', 'CHALLENGE', 'POINTS']);
-    setListValidation(ss, 'RANDOM_TEAM_HISTORY', 'D', ['TEAM', 'QUESTION', 'CHALLENGE', 'REWARD']);
+    setListValidationByHeader(ss, 'QUESTIONS', 'questionType', ['multiple_choice', 'true_false', 'short_answer', 'fill_blank', 'sorting', 'drag_drop']);
+    setListValidationByHeader(ss, 'QUESTIONS', 'difficulty', ['EASY', 'MEDIUM', 'HARD']);
+    setBooleanValidationByHeader(ss, 'QUESTIONS', ['isSpecial', 'enabled']);
 
-    setListValidation(ss, 'IMPORT_HISTORY', 'C', ['QUESTIONS', 'TEAMS']);
-    setListValidation(ss, 'IMPORT_HISTORY', 'E', ['CSV', 'XLSX', 'XLS', 'JSON']);
-    setListValidation(ss, 'IMPORT_HISTORY', 'L', ['CREATE', 'SKIP', 'UPDATE']);
-    setListValidation(ss, 'IMPORT_HISTORY', 'M', ['PROCESSING', 'SUCCESS', 'PARTIAL', 'FAILED']);
+    setListValidationByHeader(ss, 'CAM_RACE_RESULTS', 'inputMethod', ['CAMERA', 'MANUAL']);
+    setListValidationByHeader(ss, 'SMILE_RACE_RESULTS', 'inputMethod', ['CAMERA', 'MANUAL']);
 
-    setListValidation(ss, 'APP_LOGS', 'B', ['INFO', 'WARNING', 'ERROR']);
+    setListValidationByHeader(ss, 'LUCKY_WHEEL_HISTORY', 'segmentType', ['TEAM', 'QUESTION', 'REWARD', 'CHALLENGE', 'POINTS']);
+    setListValidationByHeader(ss, 'RANDOM_TEAM_HISTORY', 'pickType', ['TEAM', 'QUESTION', 'CHALLENGE', 'REWARD']);
+
+    setListValidationByHeader(ss, 'IMPORT_HISTORY', 'importType', ['QUESTIONS', 'TEAMS']);
+    setListValidationByHeader(ss, 'IMPORT_HISTORY', 'fileType', ['CSV', 'XLSX', 'XLS', 'JSON']);
+    setListValidationByHeader(ss, 'IMPORT_HISTORY', 'mode', ['CREATE', 'SKIP', 'UPDATE']);
+    setListValidationByHeader(ss, 'IMPORT_HISTORY', 'status', ['PROCESSING', 'SUCCESS', 'PARTIAL', 'FAILED']);
+
+    setListValidationByHeader(ss, 'APP_LOGS', 'level', ['INFO', 'WARNING', 'ERROR']);
   } catch (e) {
     Logger.log('Validation setup error: ' + e.toString());
   }
@@ -3788,6 +4624,8 @@ function showDatabaseSummary() {
   let summary = '📊 TỔNG QUAN HỆ THỐNG EDUPLAY (THEO ĐỘI):\n\n';
 
   const metrics = [
+    { label: 'Giáo viên (Users)', sheet: 'USERS' },
+    { label: 'Cài đặt giáo viên (Preferences)', sheet: 'USER_PREFERENCES' },
     { label: 'Trò chơi (Games)', sheet: 'GAME_CATALOG' },
     { label: 'Lớp học (Classes)', sheet: 'CLASSES' },
     { label: 'Ngân hàng câu hỏi (Banks)', sheet: 'QUESTION_BANKS' },
