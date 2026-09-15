@@ -53,7 +53,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
   // 3. Not authenticated -> Show Login view
   if (!isAuthenticated) {
-    return <LoginPage />;
+    return <LoginPage onLoginSuccess={() => {}} />;
   }
 
   // 4. Authenticated -> Render protected child components

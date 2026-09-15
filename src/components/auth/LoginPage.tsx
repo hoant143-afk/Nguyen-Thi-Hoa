@@ -20,7 +20,7 @@ interface LoginPageProps {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onExploreDemo }) => {
-  const { signInWithGoogle, loading, authError, clearError } = useAuth();
+  const { signInWithGoogle, loginAsDemo, loading, authError, clearError } = useAuth();
   const [showGuide, setShowGuide] = useState<boolean>(false);
   const validation = validateFirebaseConfig();
 
@@ -28,6 +28,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onExploreD
     soundService.playClick();
     clearError();
     await signInWithGoogle();
+    if (onLoginSuccess) {
+      onLoginSuccess();
+    }
+  };
+
+  const handleDemoLogin = () => {
+    soundService.playClick();
+    clearError();
+    if (onExploreDemo) {
+      onExploreDemo();
+    } else {
+      loginAsDemo();
+    }
     if (onLoginSuccess) {
       onLoginSuccess();
     }
@@ -184,6 +197,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onExploreD
             </>
           )}
         </button>
+
+        {/* Instant Demo / Local Experience Button */}
+        <div className="w-full mt-3">
+          <button
+            type="button"
+            onClick={handleDemoLogin}
+            className="w-full h-12 bg-gradient-to-r from-rose-600 via-pink-600 to-indigo-600 hover:from-rose-700 hover:via-pink-700 hover:to-indigo-700 text-white font-bold rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2.5 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
+          >
+            <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
+            <span className="text-sm font-black tracking-wide">
+              🎮 TRẢI NGHIỆM NGAY (CHẾ ĐỘ LỚP HỌC / DEMO)
+            </span>
+          </button>
+          <p className="text-[11px] text-slate-500 mt-1.5">
+            Sử dụng đầy đủ 6 trò chơi, bộ câu hỏi mẫu và công cụ quản lý lớp học mà không cần đăng nhập Google
+          </p>
+        </div>
 
         {/* Privacy Note */}
         <div className="mt-6 pt-6 border-t border-slate-100 w-full flex flex-col gap-2 text-[11px] text-slate-500">

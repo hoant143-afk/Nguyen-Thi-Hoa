@@ -23,7 +23,7 @@ export const EduplayUserMenu: React.FC<EduplayUserMenuProps> = ({
   onNavigate,
   onOpenSettings,
 }) => {
-  const { user, teacherProfile, teacherPreferences, logout } = useAuth();
+  const { user, teacherProfile, teacherPreferences, logout, isDemo } = useAuth();
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [isFlushing, setIsFlushing] = useState<boolean>(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
@@ -125,9 +125,9 @@ export const EduplayUserMenu: React.FC<EduplayUserMenuProps> = ({
             <div className="overflow-hidden flex-1">
               <p className="text-sm font-black text-slate-800 truncate">{displayName}</p>
               <p className="text-[11px] text-slate-500 truncate" title={email}>{email}</p>
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-100/90 px-2 py-0.5 rounded-full mt-1">
+              <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full mt-1 ${isDemo ? 'text-amber-800 bg-amber-100' : 'text-rose-700 bg-rose-100/90'}`}>
                 <Shield className="w-2.5 h-2.5" />
-                Không gian cá nhân
+                {isDemo ? 'Bản xem trước (Demo)' : 'Không gian cá nhân'}
               </span>
             </div>
           </div>

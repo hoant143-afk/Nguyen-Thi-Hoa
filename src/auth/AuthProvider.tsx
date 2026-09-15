@@ -16,10 +16,12 @@ export interface AuthContextType {
   loading: boolean;
   isSyncing: boolean;
   isAuthenticated: boolean;
+  isDemo: boolean;
   authError: string | null;
   teacherProfile: EduplayUser | null;
   teacherPreferences: EduplayUserPreferences | null;
   signInWithGoogle: () => Promise<void>;
+  loginAsDemo: () => void;
   logout: () => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
   refreshIdToken: () => Promise<string | null>;
@@ -29,8 +31,30 @@ export interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Helper to create a fully-typed simulated User for preview/demo mode
+const createDemoUser = (): User => ({
+  uid: 'demo_teacher_eduplay',
+  email: 'giaovien.demo@eduplay.vn',
+  displayName: 'Giáo viên Demo',
+  photoURL: '',
+  emailVerified: true,
+  isAnonymous: true,
+  metadata: {} as any,
+  providerData: [],
+  refreshToken: '',
+  tenantId: null,
+  delete: async () => {},
+  getIdToken: async () => 'demo_id_token',
+  getIdTokenResult: async () => ({} as any),
+  reload: async () => {},
+  toJSON: () => ({}),
+  phoneNumber: null,
+  providerId: 'firebase',
+});
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [isDemo, setIsDemo] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -125,16 +149,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Monitor Firebase Auth State
+  const loginAsDemo = useCallback(() => {
+    const demoUser = createDemoUser();
+    setUser(demoUser);
+    setIsDemo(true);
+    EduplayStorage.setTeacherUid('demo_teacher_eduplay');
+    setTeacherProfile({
+      authUid: 'demo_teacher_eduplay',
+      email: 'giaovien.demo@eduplay.vn',
+      displayName: 'Giáo viên Demo',
+      photoURL: '',
+      role: 'TEACHER',
+      enabled: true,
+      status: 'ACTIVE',
+      emailVerified: true,
+    });
+    setTeacherPreferences({
+      authUid: 'demo_teacher_eduplay',
+      defaultSchoolName: 'Trường Tiểu học Eduplay',
+      defaultClassName: '5A1',
+      defaultSubject: 'Tin học & Kỹ năng sống',
+      defaultGrade: 5,
+      defaultQuestionCount: 10,
+      defaultTeamCount: 4,
+      soundEnabled: true,
+      animationEnabled: true,
+      theme: 'LIGHT',
+    });
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('eduplay_is_demo', 'true');
+    }
+    setAuthError(null);
+  }, []);
+
+  // Monitor Firebase Auth State or Restore Demo Session
   useEffect(() => {
+    const isSavedDemo = typeof localStorage !== 'undefined' && localStorage.getItem('eduplay_is_demo') === 'true';
+    if (isSavedDemo) {
+      loginAsDemo();
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       if (firebaseUser) {
         setUser(firebaseUser);
+        setIsDemo(false);
         await syncTeacherAccount(firebaseUser);
       } else {
         // Clean up when user logs out or switches accounts
         setUser(null);
+        setIsDemo(false);
         setTeacherProfile(null);
         setTeacherPreferences(null);
         EduplayStorage.clearUserTransientState();
@@ -143,7 +209,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => unsubscribe();
-  }, [syncTeacherAccount]);
+  }, [syncTeacherAccount, loginAsDemo]);
 
   const signInWithGoogle = async () => {
     setAuthError(null);
@@ -193,10 +259,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      await signOut(auth);
+      if (!isDemo) {
+        await signOut(auth);
+      }
     } catch (err) {
       console.error('[EDUPLAY AUTH] Logout error:', err);
     } finally {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('eduplay_is_demo');
+      }
+      setIsDemo(false);
       setUser(null);
       setTeacherProfile(null);
       setTeacherPreferences(null);
@@ -231,10 +303,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loading,
     isSyncing,
     isAuthenticated: Boolean(user),
+    isDemo,
     authError,
     teacherProfile,
     teacherPreferences,
     signInWithGoogle,
+    loginAsDemo,
     logout,
     getIdToken,
     refreshIdToken,
