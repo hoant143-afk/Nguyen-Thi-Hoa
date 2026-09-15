@@ -18,6 +18,7 @@ export interface AuthContextType {
   isAuthenticated: boolean;
   isDemo: boolean;
   authError: string | null;
+  authErrorCode: string | null;
   teacherProfile: EduplayUser | null;
   teacherPreferences: EduplayUserPreferences | null;
   signInWithGoogle: () => Promise<void>;
@@ -58,11 +59,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authErrorCode, setAuthErrorCode] = useState<string | null>(null);
   const [teacherProfile, setTeacherProfile] = useState<EduplayUser | null>(null);
   const [teacherPreferences, setTeacherPreferences] = useState<EduplayUserPreferences | null>(null);
 
   const clearError = useCallback(() => {
     setAuthError(null);
+    setAuthErrorCode(null);
   }, []);
 
   const getIdToken = useCallback(async (forceRefresh: boolean = false): Promise<string | null> => {
@@ -130,7 +133,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTeacherPreferences(defaultPrefs);
       }
 
+      // 4. Load initial question banks for teacher workspace
+      try {
+        await apiClient.apiRequest('questionBanks.listMine');
+      } catch (qbErr) {
+        console.warn('[EDUPLAY AUTH] Initial questionBanks sync notice:', qbErr);
+      }
+
       setAuthError(null);
+      setAuthErrorCode(null);
     } catch (err: any) {
       console.warn('[EDUPLAY AUTH] Error during profile sync:', err);
       // Even if cloud sync has network glitch, set basic profile
@@ -213,10 +224,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithGoogle = async () => {
     setAuthError(null);
+    setAuthErrorCode(null);
     setLoading(true);
 
     const validation = validateFirebaseConfig();
     if (!validation.isValid) {
+      setAuthErrorCode('auth/missing-config');
       setAuthError(
         `Firebase chưa được cấu hình đầy đủ. Vui lòng bổ sung: ${validation.missingKeys.join(', ')}`
       );
@@ -229,27 +242,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
       console.warn('[EDUPLAY AUTH] Popup login issue:', err);
+      const code = err?.code || '';
+
       if (
-        err.code === 'auth/popup-blocked' ||
-        err.code === 'auth/cancelled-popup-request' ||
-        /popup/i.test(err.message)
+        code === 'auth/popup-blocked' ||
+        code === 'auth/cancelled-popup-request' ||
+        /popup/i.test(err?.message || '')
       ) {
         try {
           // Fallback: signInWithRedirect
           await signInWithRedirect(auth, googleProvider);
           return;
         } catch (redirectErr: any) {
-          setAuthError('Trình duyệt đang chặn cửa sổ đăng nhập. Hãy cho phép popup hoặc thử lại.');
+          const rCode = redirectErr?.code || 'auth/popup-blocked';
+          setAuthErrorCode(rCode);
+          if (rCode === 'auth/unauthorized-domain') {
+            setAuthError('Domain hiện tại chưa được Firebase cho phép.');
+          } else {
+            setAuthError('Trình duyệt đang chặn cửa sổ đăng nhập. Hãy cho phép popup hoặc thử lại.');
+          }
         }
-      } else if (err.code === 'auth/popup-closed-by-user') {
+      } else if (code === 'auth/popup-closed-by-user') {
+        setAuthErrorCode(code);
         setAuthError('Bạn đã đóng cửa sổ đăng nhập trước khi hoàn tất.');
-      } else if (err.code === 'auth/unauthorized-domain') {
-        setAuthError(
-          'Tên miền hiện tại chưa được cấp phép trong Firebase Console (Authentication → Settings → Authorized domains).'
-        );
-      } else if (err.code === 'auth/network-request-failed') {
+      } else if (code === 'auth/unauthorized-domain') {
+        setAuthErrorCode('auth/unauthorized-domain');
+        setAuthError('Domain hiện tại chưa được Firebase cho phép.');
+      } else if (code === 'auth/operation-not-allowed') {
+        setAuthErrorCode('auth/operation-not-allowed');
+        setAuthError('Google Sign-In chưa được kích hoạt trong Firebase Console (Authentication → Sign-in method).');
+      } else if (code === 'auth/network-request-failed') {
+        setAuthErrorCode(code);
         setAuthError('Không thể kết nối máy chủ xác thực. Vui lòng kiểm tra đường truyền mạng.');
       } else {
+        setAuthErrorCode(code || 'auth/unknown');
         setAuthError(err.message || 'Không thể đăng nhập bằng Google. Vui lòng thử lại.');
       }
     } finally {
@@ -305,6 +331,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAuthenticated: Boolean(user),
     isDemo,
     authError,
+    authErrorCode,
     teacherProfile,
     teacherPreferences,
     signInWithGoogle,
