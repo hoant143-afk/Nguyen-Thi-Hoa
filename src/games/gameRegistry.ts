@@ -4,7 +4,7 @@ export interface GameDefinition {
   name: string;
   subtitle: string;
   description: string;
-  iconName: 'Camera' | 'Zap' | 'Disc' | 'Flame' | 'Sparkles' | 'Trophy' | 'Users';
+  iconName: 'Camera' | 'Zap' | 'Disc' | 'Flame' | 'Sparkles' | 'Trophy' | 'Users' | 'Swords';
   category: 'Vận động & AI' | 'Trí tuệ & Trắc nghiệm' | 'May mắn & Hoạt náo' | 'Phản xạ & Tốc độ' | 'Lựa chọn' | 'Thi đua nhóm';
   suitableSubject: string;
   players: string;
@@ -82,6 +82,34 @@ export const GAME_REGISTRY: GameDefinition[] = [
       badgeText: 'text-amber-800 border-amber-300',
       accentColor: 'text-purple-600',
       cardBorder: 'hover:border-purple-400 hover:shadow-purple-500/20',
+    },
+  },
+  {
+    id: 'fruit-slash',
+    slug: 'fruit-slash',
+    name: 'FRUIT SLASH QUIZ',
+    subtitle: 'Chém trái cây giành quyền',
+    description: 'Đại chiến chém trái cây qua webcam – 2 đội dùng chuyển động tay vung chém trái cây bay để giành quyền trả lời.',
+    minTeams: 2,
+    maxTeams: 2,
+    supportsCamera: true,
+    supportsQuestions: true,
+    supportsScore: true,
+    supportsCertificate: true,
+    iconName: 'Swords',
+    category: 'Vận động & AI',
+    suitableSubject: 'Mọi môn học (Khởi động, Ôn tập, Phản xạ)',
+    players: '2 Đội',
+    route: '/games/fruit-slash',
+    enabled: true,
+    featured: true,
+    badge: '🍉 Chém trái cây',
+    theme: {
+      gradient: 'from-rose-600 via-orange-600 to-amber-700',
+      badgeBg: 'bg-rose-500/20',
+      badgeText: 'text-rose-300 border-rose-500/40',
+      accentColor: 'text-rose-400',
+      cardBorder: 'hover:border-rose-400/80 hover:shadow-rose-500/20',
     },
   },
   {

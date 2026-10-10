@@ -5,9 +5,9 @@ import { SmileDetector, SmileGestureMetrics, TeamMarkerResult, computeTeamZones 
 import { soundService } from '../../services/soundService';
 
 export interface SmileCalibrationSettings {
-  smileThreshold: number; // default 0.55 (nhạy và nhanh hơn)
+  smileThreshold: number; // default 0.55 (chuẩn xác & tự nhiên)
   markerThreshold: number; // default 0.30
-  requiredStableFrames: number; // default 2 (phản xạ nhanh ~50-60ms)
+  requiredStableFrames: number; // default 3 (ổn định cử chỉ nụ cười thật)
   tieThresholdMs: number; // default 200
   stealMode: 'TEACHER_SELECT' | 'NEXT_TEAM' | 'LOWEST_SCORE' | 'RANDOM_OTHER_TEAM';
   stealRoundingMode: 'FLOOR' | 'ROUND' | 'CEIL';

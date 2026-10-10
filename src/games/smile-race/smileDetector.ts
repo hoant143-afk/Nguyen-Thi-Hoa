@@ -168,42 +168,62 @@ export function rgbToHsv(r: number, g: number, b: number): { h: number; s: numbe
 }
 
 /**
- * Robust Skin pixel detector for face localization.
- * Checks normalized chromaticity and HSV color space to reject:
- * - White/grey ceiling lights and painted walls (r ~ g ~ b)
- * - Deep dark shadows (low intensity)
- * - Pure saturated non-skin surfaces
+ * Biological Human Skin Detector in YCbCr & Normalized RGB space.
+ * Human blood circulation gives skin a distinct hemoglobin/melanin chromaticity.
+ * Rejects:
+ * - Wooden desks, tables, doors, flooring, corkboards (which lack human Cr flush or have high yellow/Cb)
+ * - White/gray ceiling panels, walls, and fluorescent glare
+ * - Deep dark shadows, cloth garments
  */
 export function isSkinTone(r: number, g: number, b: number): boolean {
-  // Reject neutral white / grey / ceiling light panels (r ~ g ~ b)
-  if (Math.abs(r - g) < 9 && Math.abs(g - b) < 9) {
+  // Reject extreme highlights and deep shadows
+  if (r < 55 || g < 38 || b < 22 || (r > 248 && g > 248 && b > 238)) {
     return false;
   }
-  // Reject dark shadows and oversaturated ceiling lights
-  if (r < 55 || g < 35 || b < 25 || (r > 245 && g > 235 && b > 220)) {
+  // Reject neutral gray / black / white (r ~ g ~ b)
+  if (Math.abs(r - g) < 8 && Math.abs(g - b) < 8) {
     return false;
   }
-  // Human skin: Red must be clearly dominant over Green, and Green >= Blue
-  if (r > g + 7 && r > b + 10) {
+
+  // Red component must be distinctly dominant over Green, and Green >= Blue
+  if (r <= g + 9 || r <= b + 15) {
+    return false;
+  }
+
+  // Standard ITU-R BT.601 YCbCr representation
+  const Cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const Cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+
+  // Genuine human skin cluster in YCbCr:
+  // Cr is elevated (134 to 175) due to capillary hemoglobin
+  // Cb is tightly bounded (80 to 127)
+  // Cr - Cb >= 10
+  if (Cr >= 134 && Cr <= 175 && Cb >= 78 && Cb <= 127 && (Cr - Cb) >= 12) {
     const total = r + g + b;
     const rNorm = r / total;
     const gNorm = g / total;
-    // Normalized color coordinates for human skin across diverse complexions
-    if (rNorm >= 0.35 && rNorm <= 0.62 && gNorm >= 0.24 && gNorm <= 0.39) {
+    if (rNorm >= 0.36 && rNorm <= 0.60 && gNorm >= 0.25 && gNorm <= 0.38) {
       const hsv = rgbToHsv(r, g, b);
-      if (hsv.s >= 14 && hsv.s <= 78 && (hsv.h <= 45 || hsv.h >= 340)) {
+      if (hsv.s >= 16 && hsv.s <= 76 && (hsv.h <= 42 || hsv.h >= 342)) {
         return true;
       }
     }
   }
+
   return false;
 }
 
 /**
- * Facial Structure & Anatomy Contrast Verifier:
- * Validates that candidate bounding box actually contains facial anatomy
- * (dark eye sockets relative to forehead/cheeks, lighter nose bridge between them),
- * rather than a flat wooden desk, chair, door, or wall.
+ * Strict Facial Anatomy & Viola-Jones Invariant Verifier.
+ * Every human face has a definitive anatomical geometry:
+ * - Two bilateral dark eye cavities & eyebrows (Left & Right eyes)
+ * - A central elevated nose bridge between the eyes that is significantly brighter than the eye cavities
+ * - A lighter forehead above and cheeks below
+ * - Bilateral symmetry between left and right eyes
+ * 
+ * Empty rooms, wooden tables, chairs, painted walls, books, or doors
+ * COMPLETELY FAIL this test because they do NOT possess a pair of dark eye depressions
+ * separated by a bright central nasal ridge.
  */
 function verifyFaceFeatures(
   faceBox: BoundingBox,
@@ -215,11 +235,11 @@ function verifyFaceFeatures(
 
   // Aspect ratio check: Human head is roughly 0.95 to 1.70 times taller than wide
   const aspectRatio = h / Math.max(1, w);
-  if (aspectRatio < 0.90 || aspectRatio > 1.75) {
+  if (aspectRatio < 0.92 || aspectRatio > 1.75) {
     return false;
   }
 
-  // Helper to compute average luminance in a sub-rectangle of the face
+  // Helper to compute average luminance in a relative sub-rectangle of the face
   const getSubRegionLum = (relX: number, relY: number, relW: number, relH: number): number => {
     const startX = Math.max(0, Math.floor(x + w * relX));
     const endX = Math.min(canvasW, Math.ceil(x + w * (relX + relW)));
@@ -238,38 +258,44 @@ function verifyFaceFeatures(
     return count > 0 ? sum / count : 128;
   };
 
-  // 1. Forehead region (upper 14%-26% of face, center 50% width)
-  const foreheadLum = getSubRegionLum(0.25, 0.14, 0.50, 0.12);
+  // 1. Forehead region (upper 12%-25% of face, center 50% width)
+  const foreheadLum = getSubRegionLum(0.25, 0.12, 0.50, 0.13);
 
-  // 2. Left eye region (32%-46% height, 18%-42% width)
-  const leftEyeLum = getSubRegionLum(0.18, 0.32, 0.24, 0.14);
+  // 2. Left eye socket region (30%-46% height, 18%-40% width)
+  const leftEyeLum = getSubRegionLum(0.18, 0.30, 0.22, 0.16);
 
-  // 3. Right eye region (32%-46% height, 58%-82% width)
-  const rightEyeLum = getSubRegionLum(0.58, 0.32, 0.24, 0.14);
+  // 3. Right eye socket region (30%-46% height, 60%-82% width)
+  const rightEyeLum = getSubRegionLum(0.60, 0.30, 0.22, 0.16);
 
-  // 4. Nose bridge between eyes (32%-46% height, 43%-57% width)
-  const noseBridgeLum = getSubRegionLum(0.43, 0.32, 0.14, 0.14);
+  // 4. Central nose bridge between the two eyes (30%-46% height, 42%-58% width)
+  const noseBridgeLum = getSubRegionLum(0.42, 0.30, 0.16, 0.16);
 
-  // 5. Cheeks (48%-62% height, 22%-78% width)
-  const cheeksLum = getSubRegionLum(0.22, 0.50, 0.56, 0.12);
+  // 5. Upper cheeks region (50%-64% height, 22%-78% width)
+  const cheeksLum = getSubRegionLum(0.22, 0.50, 0.56, 0.14);
 
-  // Eye sockets & brows make eye regions darker than forehead or cheeks
-  const leftEyeContrast = Math.max(foreheadLum - leftEyeLum, cheeksLum - leftEyeLum);
-  const rightEyeContrast = Math.max(foreheadLum - rightEyeLum, cheeksLum - rightEyeLum);
-  const avgEyeContrast = (leftEyeContrast + rightEyeContrast) / 2;
+  // Anatomical requirement 1: Eye sockets are darker than forehead OR cheeks
+  const leftEyeDark = Math.max(foreheadLum - leftEyeLum, cheeksLum - leftEyeLum);
+  const rightEyeDark = Math.max(foreheadLum - rightEyeLum, cheeksLum - rightEyeLum);
 
-  // Nose bridge between the eyes is elevated and brighter than the two eye sockets
-  const bridgeRise = noseBridgeLum - (leftEyeLum + rightEyeLum) / 2;
+  // Anatomical requirement 2: The nose bridge between the eyes is elevated and brighter than the two eyes
+  const avgEyeLum = (leftEyeLum + rightEyeLum) / 2;
+  const bridgeElevation = noseBridgeLum - avgEyeLum;
 
-  // Internal feature variance test across face zones
-  const lums = [foreheadLum, leftEyeLum, rightEyeLum, noseBridgeLum, cheeksLum];
-  const avgLum = lums.reduce((s, v) => s + v, 0) / lums.length;
-  const variance = lums.reduce((s, v) => s + Math.abs(v - avgLum), 0) / lums.length;
+  // Anatomical requirement 3: Bilateral eye balance (eyes are roughly symmetric, unlike diagonal room shadows)
+  const eyeImbalance = Math.abs(leftEyeLum - rightEyeLum);
 
-  // On a flat wooden table, blank door, or painted wall:
-  // forehead, eye regions, and cheeks have virtually identical luminance (contrast < 4, variance < 3).
-  // A real human face exhibits clear contrast valley (avgEyeContrast >= 5, or bridgeRise >= 2, or variance >= 5.5).
-  if (avgEyeContrast < 4.5 && bridgeRise < 2.0 && variance < 4.5) {
+  // A genuine face MUST satisfy eye contrast and bridge elevation!
+  // On a flat desk, wall, or wooden surface, eyes and nose bridge have flat contrast (leftEyeDark < 4, bridgeElevation < 2.5).
+  if (leftEyeDark < 4.0 || rightEyeDark < 4.0) {
+    return false;
+  }
+
+  if (bridgeElevation < 2.5) {
+    return false;
+  }
+
+  if (eyeImbalance > 38) {
+    // Massive asymmetric shadow, not a clear face
     return false;
   }
 
@@ -278,7 +304,7 @@ function verifyFaceFeatures(
 
 /**
  * Scan a specific region of the image for a connected face cluster.
- * Rejects empty space, scattered lights, furniture, and walls.
+ * Rejects empty space, scattered lights, furniture, desks, and walls.
  */
 function findFaceClusterInRegion(
   startX: number,
@@ -291,11 +317,11 @@ function findFaceClusterInRegion(
 ): BoundingBox | null {
   const zoneW = endX - startX;
   const zoneH = endY - startY;
-  const cellW = 8;
-  const cellH = 8;
+  const cellW = 6;
+  const cellH = 6;
   const cols = Math.floor(zoneW / cellW);
   const rows = Math.floor(zoneH / cellH);
-  if (cols < 3 || rows < 3) return null;
+  if (cols < 4 || rows < 4) return null;
 
   const grid = new Int16Array(cols * rows);
 
@@ -329,8 +355,8 @@ function findFaceClusterInRegion(
     }
   }
 
-  // If even the densest cell has fewer than 4 skin pixels (out of 16 sampled per cell),
-  // there is no face here at all!
+  // If even the densest cell has fewer than 4 skin pixels (out of 9 sampled per cell),
+  // there is no face in this room!
   if (maxCellCount < 4 || peakR === -1) {
     return null;
   }
@@ -376,16 +402,22 @@ function findFaceClusterInRegion(
   }
 
   // A genuine face requires a solid compact cluster:
-  // At least 9 active cells and 100 skin pixels
-  if (clusterCellCount < 9 || clusterSkinPixels < 100) {
+  // At least 10 active cells and 80 skin pixels
+  if (clusterCellCount < 10 || clusterSkinPixels < 80) {
     return null;
   }
 
   const rawW = (maxC - minC + 1) * cellW;
   const rawH = (maxR - minR + 1) * cellH;
 
-  // Minimum physical face dimensions (at least 30x36 pixels)
-  if (rawW < 30 || rawH < 36) {
+  // Minimum physical face dimensions (at least 28x32 pixels in webcam frame)
+  if (rawW < 28 || rawH < 32) {
+    return null;
+  }
+
+  // Rejection of massive background wall or table:
+  // If the cluster spans > 88% of the zone width and touches both borders, it is a desk or wall!
+  if (rawW > zoneW * 0.88 && minC === 0 && maxC >= cols - 1) {
     return null;
   }
 
@@ -481,8 +513,13 @@ export class SmileDetector {
     const width = this.processingCanvas.width;
     const height = this.processingCanvas.height;
 
-    // Draw current video frame to processing canvas
+    // Draw frame flipped horizontally so screen left corresponds to canvas left (x: 0)
+    this.processingCtx.save();
+    this.processingCtx.translate(width, 0);
+    this.processingCtx.scale(-1, 1);
     this.processingCtx.drawImage(video, 0, 0, width, height);
+    this.processingCtx.restore();
+
     const imageData = this.processingCtx.getImageData(0, 0, width, height);
 
     // Try native Chromium Shape Detection first if available
@@ -523,11 +560,12 @@ export class SmileDetector {
   }
 
   /**
-   * High-Precision Mouth Geometry & Smile Analysis:
-   * 1. Teeth brightness & exposure (hallmark of open smile in competition!)
-   * 2. Horizontal mouth width span (mouth stretches from ~0.38 to ~0.55+ of face width)
-   * 3. Vertical mouth opening / cavity (expansion during smile/laughter)
-   * 4. Upward elevation of lip corners relative to lower lip center
+   * High-Precision Mouth Geometry & Adaptive Smile Analysis:
+   * 1. Horizontal mouth width span (expands significantly during smile from ~0.38 to ~0.52+ of face width)
+   * 2. Upward elevation of lip corners relative to center (zygomaticus pull)
+   * 3. Visible teeth brightness and oral cavity contrast
+   * 4. Vertical opening / height ratio
+   * 5. Relative delta vs neutral baseline (if available)
    */
   private calculateMetricsFromMouthROI(
     faceBox: BoundingBox,
@@ -538,116 +576,145 @@ export class SmileDetector {
   ): SmileGestureMetrics {
     const data = imageData.data;
 
-    // Anatomically positioned mouth ROI (lower 60% to 86% of face)
-    const mouthW = Math.round(faceBox.width * 0.58);
-    const mouthH = Math.round(faceBox.height * 0.28);
-    const mouthX = Math.round(faceBox.x + (faceBox.width - mouthW) / 2);
-    const mouthY = Math.round(faceBox.y + faceBox.height * 0.62);
+    // Anatomically positioned mouth search region (lower 60% to 88% of face)
+    const mouthROIWidth = Math.round(faceBox.width * 0.62);
+    const mouthROIHeight = Math.round(faceBox.height * 0.28);
+    const mouthROIX = Math.round(faceBox.x + (faceBox.width - mouthROIWidth) / 2);
+    const mouthROIY = Math.round(faceBox.y + faceBox.height * 0.62);
 
     const mouthBox: BoundingBox = {
-      x: Math.max(0, mouthX),
-      y: Math.max(0, mouthY),
-      width: Math.min(canvasW - mouthX, mouthW),
-      height: Math.min(canvasH - mouthY, mouthH),
+      x: Math.max(0, Math.min(canvasW - 20, mouthROIX)),
+      y: Math.max(0, Math.min(canvasH - 20, mouthROIY)),
+      width: Math.max(16, Math.min(canvasW - mouthROIX, mouthROIWidth)),
+      height: Math.max(12, Math.min(canvasH - mouthROIY, mouthROIHeight)),
     };
-
-    let teethPixels = 0;
-    let lipPixels = 0;
-    let cavityPixels = 0;
-
-    let minFeatureX = canvasW;
-    let maxFeatureX = 0;
-    let minFeatureY = canvasH;
-    let maxFeatureY = 0;
-
-    // Corner tracking
-    let leftCornerYSum = 0;
-    let leftCornerCount = 0;
-    let rightCornerYSum = 0;
-    let rightCornerCount = 0;
-    let bottomCenterY = mouthBox.y + mouthBox.height / 2;
 
     const startX = mouthBox.x;
     const endX = mouthBox.x + mouthBox.width;
     const startY = mouthBox.y;
     const endY = mouthBox.y + mouthBox.height;
 
-    const leftBoundaryX = mouthBox.x + mouthBox.width * 0.28;
-    const rightBoundaryX = mouthBox.x + mouthBox.width * 0.72;
-    const centerMidX = mouthBox.x + mouthBox.width * 0.50;
+    // 1. Sample upper cheek skin luminance (for adaptive lip & teeth thresholding)
+    let cheekLumSum = 0;
+    let cheekCount = 0;
+    const cheekY = Math.max(0, Math.floor(faceBox.y + faceBox.height * 0.48));
+    for (
+      let cx = Math.max(0, Math.floor(faceBox.x + faceBox.width * 0.22));
+      cx < Math.min(canvasW, Math.floor(faceBox.x + faceBox.width * 0.78));
+      cx += 3
+    ) {
+      const idx = (cheekY * canvasW + cx) * 4;
+      cheekLumSum += 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+      cheekCount++;
+    }
+    const avgCheekLum = cheekCount > 0 ? cheekLumSum / cheekCount : 120;
+
+    // Track mouth features:
+    // Count feature pixels per horizontal column to prevent isolated chin/neck pixels from falsely stretching width
+    const colFeatureCounts = new Uint16Array(endX - startX + 1);
+
+    let teethPixels = 0;
+    let cavityPixels = 0;
+    let lipPixels = 0;
+
+    // Lip corner tracking
+    let leftCornerYSum = 0;
+    let leftCornerCount = 0;
+    let rightCornerYSum = 0;
+    let rightCornerCount = 0;
+    let mouthCenterYSum = 0;
+    let mouthCenterCount = 0;
+
+    const leftBoundaryX = startX + mouthBox.width * 0.28;
+    const rightBoundaryX = startX + mouthBox.width * 0.72;
+    const centerMidX = startX + mouthBox.width * 0.50;
 
     for (let y = startY; y < endY; y += 2) {
       for (let x = startX; x < endX; x += 2) {
         const idx = (y * canvasW + x) * 4;
-        const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
 
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
         const sat = Math.max(r, g, b) - Math.min(r, g, b);
-        const lipIntensity = (2 * r - g - b) / (r + g + 1);
 
-        // 1. Bright teeth pixels (hallmark of smile!)
-        const isTeeth = lum >= 115 && sat <= 42 && r >= 90 && g >= 85 && b >= 70;
-        if (isTeeth) {
-          teethPixels++;
-        }
+        // A. Teeth pixels: Lighter than lips/cheeks, low color saturation (white/ivory)
+        const isTeeth =
+          (lum >= 112 && sat <= 34 && lum >= avgCheekLum * 0.92) ||
+          (lum >= 135 && sat <= 40);
 
-        // 2. Open oral cavity (shadow inside mouth during wide smile / laughter)
-        const isCavity = lum <= 65 && r <= 80;
-        if (isCavity) {
-          cavityPixels++;
-        }
+        // B. Open oral cavity (interior mouth opening during laugh/wide smile)
+        const isCavity = lum <= 54 && lum <= avgCheekLum * 0.54;
 
-        // 3. Natural lips contour
-        const isLip = (lipIntensity >= 0.11 || (r > g + 14 && r > b + 16)) && r >= 55;
-        if (isLip) {
-          lipPixels++;
-        }
+        // C. Lip vermilion contour:
+        // Must show distinct redness over green/blue AND be slightly darker than upper cheek flush
+        const isLip =
+          (r >= g + 22 && r >= b + 24 && r >= 65 && lum <= avgCheekLum * 0.98) ||
+          ((r - g) / Math.max(1, r + g) >= 0.22 && lum <= avgCheekLum * 0.95);
 
-        // Active mouth feature
+        if (isTeeth) teethPixels++;
+        if (isCavity) cavityPixels++;
+        if (isLip) lipPixels++;
+
         if (isTeeth || isCavity || isLip) {
-          if (x < minFeatureX) minFeatureX = x;
-          if (x > maxFeatureX) maxFeatureX = x;
-          if (y < minFeatureY) minFeatureY = y;
-          if (y > maxFeatureY) maxFeatureY = y;
+          const colIdx = x - startX;
+          if (colIdx >= 0 && colIdx < colFeatureCounts.length) {
+            colFeatureCounts[colIdx]++;
+          }
 
-          // Track left corner vs right corner
+          // Corner vs Center height tracking
           if (x <= leftBoundaryX) {
             leftCornerYSum += y;
             leftCornerCount++;
           } else if (x >= rightBoundaryX) {
             rightCornerYSum += y;
             rightCornerCount++;
-          }
-
-          // Center lower lip
-          if (Math.abs(x - centerMidX) < 10 && y > bottomCenterY) {
-            bottomCenterY = y;
+          } else if (Math.abs(x - centerMidX) <= mouthBox.width * 0.18) {
+            mouthCenterYSum += y;
+            mouthCenterCount++;
           }
         }
       }
     }
 
-    // Compute detected mouth dimensions
-    const detectedMouthW = (maxFeatureX > minFeatureX)
-      ? (maxFeatureX - minFeatureX)
-      : Math.round(mouthBox.width * 0.65);
-    const detectedMouthH = (maxFeatureY > minFeatureY)
-      ? (maxFeatureY - minFeatureY)
-      : Math.round(mouthBox.height * 0.45);
+    // Measure active mouth span using column density (requires at least 2 pixels per column)
+    let minActiveX = -1;
+    let maxActiveX = -1;
+    for (let c = 0; c < colFeatureCounts.length; c++) {
+      if (colFeatureCounts[c] >= 2) {
+        if (minActiveX === -1) minActiveX = startX + c;
+        maxActiveX = startX + c;
+      }
+    }
 
-    const mouthWidthRatio = Math.min(1, Math.max(0.15, detectedMouthW / Math.max(1, faceBox.width)));
-    const mouthHeightRatio = Math.min(1, Math.max(0.05, detectedMouthH / Math.max(1, faceBox.height)));
+    let detectedMouthW = faceBox.width * 0.36; // Default to neutral resting mouth width
+    if (minActiveX !== -1 && maxActiveX > minActiveX && (teethPixels + cavityPixels + lipPixels) >= 8) {
+      detectedMouthW = maxActiveX - minActiveX;
+    }
+    // Clamp to realistic anatomical range: 30% to 62% of face width
+    detectedMouthW = Math.min(faceBox.width * 0.62, Math.max(faceBox.width * 0.30, detectedMouthW));
+    const detectedMouthH = Math.max(10, mouthBox.height * 0.45);
+
+    const mouthWidthRatio = detectedMouthW / Math.max(1, faceBox.width);
+    const mouthHeightRatio = detectedMouthH / Math.max(1, faceBox.height);
     const mouthAspectRatio = detectedMouthW / Math.max(1, detectedMouthH);
 
-    // Corner elevation: Lip corners elevate upward (smaller Y) during smile
-    const leftCornerY = leftCornerCount > 0 ? leftCornerYSum / leftCornerCount : mouthBox.y + mouthBox.height * 0.5;
-    const rightCornerY = rightCornerCount > 0 ? rightCornerYSum / rightCornerCount : mouthBox.y + mouthBox.height * 0.5;
+    // Corner elevation: When smiling, lip corners are pulled UPWARD (smaller Y in screen space)
+    // compared to the mouth center bottom
+    const leftCornerY = leftCornerCount > 0 ? leftCornerYSum / leftCornerCount : mouthBox.y + mouthBox.height * 0.52;
+    const rightCornerY = rightCornerCount > 0 ? rightCornerYSum / rightCornerCount : mouthBox.y + mouthBox.height * 0.52;
     const avgCornersY = (leftCornerY + rightCornerY) / 2;
-    const cornerElevation = Math.max(-0.2, (bottomCenterY - avgCornersY) / Math.max(1, detectedMouthH));
+    const mouthCenterY = mouthCenterCount > 0 ? mouthCenterYSum / mouthCenterCount : mouthBox.y + mouthBox.height * 0.50;
 
-    // Teeth Ratio
-    const roiSampleArea = (mouthBox.width * mouthBox.height) / 4;
-    const teethRatio = teethPixels / Math.max(1, roiSampleArea);
+    // Corner elevation factor: positive ONLY when corners are pulled higher than mouth center
+    const cornerElevation = (mouthCenterY - avgCornersY) / Math.max(1, detectedMouthH);
+
+    // Sample area ratio of teeth and open oral cavity
+    const totalMouthSamples = Math.max(1, (mouthBox.width * mouthBox.height) / 4);
+    const teethRatio = teethPixels / totalMouthSamples;
+    const cavityRatio = cavityPixels / totalMouthSamples;
+    const teethOrCavityRatio = (teethPixels + cavityPixels) / totalMouthSamples;
 
     // Baseline delta comparison if available
     let baselineDelta = 0;
@@ -655,36 +722,50 @@ export class SmileDetector {
       baselineDelta = (mouthWidthRatio - this.neutralBaseline.mouthWidthRatio) / this.neutralBaseline.mouthWidthRatio;
     }
 
-    // Factors:
-    // 1. Teeth factor: strong positive signal (0.0 to 1.0)
-    const teethFactor = Math.min(1, teethRatio * 3.8);
+    // --- ACCURATE COMPONENT SCORING ---
+    // 1. Width score:
+    // Resting mouth width ratio is typically 0.34 - 0.40.
+    // Smiling mouth stretches to 0.46 - 0.58+.
+    const widthScore = Math.min(1, Math.max(0, (mouthWidthRatio - 0.40) / 0.12));
 
-    // 2. Width factor: resting is ~0.38-0.42, smiling stretches to 0.48-0.65
-    const widthFactor = Math.min(1, Math.max(0, (mouthWidthRatio - 0.40) / 0.16));
+    // 2. Corner lift score:
+    // Resting corner elevation is <= 0.02.
+    // Genuine smiling corner lift is 0.05 to 0.20+.
+    const cornerScore = Math.min(1, Math.max(0, (cornerElevation - 0.04) / 0.11));
 
-    // 3. Opening/height factor: open smile is 0.14-0.25 of face height
-    const heightFactor = Math.min(1, Math.max(0, (mouthHeightRatio - 0.08) / 0.14));
+    // 3. Teeth / Cavity score:
+    // Open smile / laugh with visible teeth:
+    const teethScore = Math.min(1, Math.max(0, (teethOrCavityRatio - 0.032) / 0.10));
 
-    // 4. Corner elevation factor: corners curve upward
-    const cornerFactor = Math.min(1, Math.max(0, (cornerElevation - 0.08) / 0.22));
+    // 4. Vertical opening score:
+    const heightScore = Math.min(1, Math.max(0, (mouthHeightRatio - 0.09) / 0.12));
 
-    // 5. Baseline factor:
-    const baselineFactor = baselineDelta > 0 ? Math.min(1, baselineDelta * 3.2) : 0;
+    // 5. Baseline dynamic delta bonus:
+    const baselineBonus = baselineDelta > 0.08 ? Math.min(1, (baselineDelta - 0.08) / 0.15) : 0;
 
-    let score = 0;
-    if (teethFactor >= 0.20) {
-      // Open smile with visible teeth: primary classroom gesture!
-      score = teethFactor * 0.46 + widthFactor * 0.32 + heightFactor * 0.14 + cornerFactor * 0.08;
+    let compositeScore = 0;
+
+    // CRITICAL: A human cannot smile without either:
+    // (a) Showing teeth or open laughter cavity (teethScore >= 0.20), OR
+    // (b) Distinctly lifting the lip corners upward (cornerScore >= 0.25).
+    // If BOTH are absent, this is a NEUTRAL/RESTING face -> cap score at <= 0.18!
+    if (teethScore < 0.20 && cornerScore < 0.25) {
+      // Neutral resting face: strictly low score
+      compositeScore = Math.min(0.18, widthScore * 0.15);
+    } else if (teethScore >= 0.20) {
+      // Open smile with visible teeth / laughter
+      compositeScore = teethScore * 0.44 + widthScore * 0.36 + cornerScore * 0.20;
     } else {
-      // Broad closed-mouth smile: wide stretch + upward corners
-      score = widthFactor * 0.52 + cornerFactor * 0.36 + heightFactor * 0.12;
+      // Closed grin: corners pulled distinctly upward + lateral stretch
+      compositeScore = cornerScore * 0.55 + widthScore * 0.45;
     }
 
-    if (this.neutralBaseline && this.neutralBaseline.sampleCount >= 2) {
-      score = score * 0.70 + baselineFactor * 0.30;
+    // Incorporate baseline bonus if student broke into smile from calibrated neutral state
+    if (baselineBonus > 0 && compositeScore > 0.25) {
+      compositeScore = compositeScore * 0.70 + baselineBonus * 0.30;
     }
 
-    const smileGestureScore = Math.round(Math.min(1, Math.max(0, score)) * 100) / 100;
+    const smileGestureScore = Math.round(Math.min(1, Math.max(0, compositeScore)) * 100) / 100;
 
     return {
       faceDetected: true,
@@ -710,7 +791,7 @@ export class SmileDetector {
   public async analyzeTeamZones(
     video: HTMLVideoElement,
     teams: { id: string; teamCode: string; name: string; color: string; markerColor?: string }[],
-    smileThreshold: number = 0.55
+    smileThreshold: number = 0.50
   ): Promise<TeamZoneAnalysis[]> {
     const zones = computeTeamZones(teams);
 
@@ -782,7 +863,7 @@ export class SmileDetector {
         }
       }
 
-      // 2. Pure Canvas Face Cluster Detection & Anatomical Verification
+      // 2. Pure Canvas Face Cluster Detection & Anatomical Viola-Jones Verification
       const faceBox = findFaceClusterInRegion(startX, endX, startY, endY, data, width, height);
 
       // If no valid face is present in this room:
@@ -800,7 +881,7 @@ export class SmileDetector {
         };
       }
 
-      // Real face is confirmed! Analyze mouth and smile:
+      // Real human face is confirmed! Analyze mouth and smile:
       const metrics = this.calculateMetricsFromMouthROI(faceBox, imageData, width, height, 'CANVAS_GEOMETRY');
       const isSmiling = metrics.faceDetected && metrics.smileGestureScore >= smileThreshold;
 
@@ -822,6 +903,11 @@ export class SmileDetector {
    * Render a specific team's camera booth/room onto their dedicated canvas.
    * Mirrors the video horizontally so participants see their own motion naturally.
    */
+  /**
+   * Render a specific team's camera booth/room onto their dedicated canvas.
+   * STRICTLY PRESERVES 1:1 pixel aspect ratio (no stretching or squashing faces).
+   * Mirrors the video horizontally so participants see their own motion naturally.
+   */
   public renderZoneToCanvas(
     video: HTMLVideoElement,
     zone: TeamZone,
@@ -836,6 +922,7 @@ export class SmileDetector {
 
     const cw = targetCanvas.width;
     const ch = targetCanvas.height;
+    if (cw === 0 || ch === 0) return;
 
     // Clear canvas
     ctx.clearRect(0, 0, cw, ch);
@@ -843,66 +930,162 @@ export class SmileDetector {
     const vw = video.videoWidth || 640;
     const vh = video.videoHeight || 480;
 
-    // Mirrored coordinates mapping:
-    const sx = Math.max(0, (1 - zone.normX - zone.normWidth) * vw);
-    const sy = Math.max(0, zone.normY * vh);
-    const sw = Math.min(vw - sx, zone.normWidth * vw);
-    const sh = Math.min(vh - sy, zone.normHeight * vh);
+    // Raw video horizontal boundaries corresponding to this zone (mirrored mapping)
+    const rawZoneX = Math.max(0, (1 - zone.normX - zone.normWidth) * vw);
+    const rawZoneY = Math.max(0, zone.normY * vh);
+    const rawZoneW = Math.min(vw - rawZoneX, zone.normWidth * vw);
+    const rawZoneH = Math.min(vh - rawZoneY, zone.normHeight * vh);
 
+    if (rawZoneW <= 0 || rawZoneH <= 0) return;
+
+    // Calculate aspect ratios
+    const targetAspect = cw / ch;
+    const zoneAspect = rawZoneW / rawZoneH;
+
+    // Aspect-ratio preserving crop inside the zone (TRUE object-cover: 100% distortion-free)
+    let cropSx = rawZoneX;
+    let cropSy = rawZoneY;
+    let cropSw = rawZoneW;
+    let cropSh = rawZoneH;
+
+    if (zoneAspect < targetAspect) {
+      // Zone is taller than target canvas (e.g. 2:3 vertical zone into 4:3 canvas)
+      // Fit width, crop excess height with bias towards upper portion (human face area)
+      cropSw = rawZoneW;
+      cropSh = rawZoneW / targetAspect;
+      const excessH = rawZoneH - cropSh;
+      cropSy = rawZoneY + Math.max(0, Math.min(excessH, excessH * 0.18));
+      cropSx = rawZoneX;
+    } else {
+      // Zone is wider than target canvas
+      // Fit height, crop excess width centered
+      cropSh = rawZoneH;
+      cropSw = rawZoneH * targetAspect;
+      const excessW = rawZoneW - cropSw;
+      cropSx = rawZoneX + Math.max(0, excessW / 2);
+      cropSy = rawZoneY;
+    }
+
+    // Draw the cropped video region onto target canvas (mirrored horizontally)
     ctx.save();
-    // Mirror horizontally so the participant feels like they are in a mirror
     ctx.translate(cw, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+    ctx.drawImage(video, cropSx, cropSy, cropSw, cropSh, 0, 0, cw, ch);
     ctx.restore();
 
-    // Draw Face and Mouth HUD ONLY if a real face is verified in this room!
+    // Draw Face and Mouth HUD ONLY if a real human face is verified in this room!
     if (analysis && analysis.metrics.faceDetected && analysis.metrics.faceBox) {
       const fb = analysis.metrics.faceBox;
-      const zonePixelW = zone.normWidth * this.processingCanvas.width;
-      const zonePixelH = zone.normHeight * this.processingCanvas.height;
-      const zonePixelX = zone.normX * this.processingCanvas.width;
-      const zonePixelY = zone.normY * this.processingCanvas.height;
+      const pw = this.processingCanvas.width;
+      const ph = this.processingCanvas.height;
 
-      const relX = Math.max(0, (fb.x - zonePixelX) / zonePixelW);
-      const relY = Math.max(0, (fb.y - zonePixelY) / zonePixelH);
-      const relW = Math.max(0.1, Math.min(1, fb.width / zonePixelW));
-      const relH = Math.max(0.1, Math.min(1, fb.height / zonePixelH));
+      // In mirrored coordinate space:
+      const cropMirroredX = vw - (cropSx + cropSw);
+      const cropNormX = cropMirroredX / vw;
+      const cropNormY = cropSy / vh;
+      const cropNormW = cropSw / vw;
+      const cropNormH = cropSh / vh;
 
-      const boxX = relX * cw;
-      const boxY = relY * ch;
-      const boxW = relW * cw;
-      const boxH = relH * ch;
+      const normFaceX = fb.x / pw;
+      const normFaceY = fb.y / ph;
+      const normFaceW = fb.width / pw;
+      const normFaceH = fb.height / ph;
+
+      const relX = (normFaceX - cropNormX) / cropNormW;
+      const relY = (normFaceY - cropNormY) / cropNormH;
+      const relW = normFaceW / cropNormW;
+      const relH = normFaceH / cropNormH;
+
+      const boxX = Math.max(4, Math.min(cw - 20, relX * cw));
+      const boxY = Math.max(4, Math.min(ch - 20, relY * ch));
+      const boxW = Math.max(20, Math.min(cw - boxX - 4, relW * cw));
+      const boxH = Math.max(20, Math.min(ch - boxY - 4, relH * ch));
 
       ctx.save();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = analysis.isSmiling ? '#fbbf24' : (zone.color || '#38bdf8');
+      const isSmiling = analysis.isSmiling;
+
+      // Rounded Face Box
+      ctx.lineWidth = isSmiling ? 3.5 : 2;
+      ctx.strokeStyle = isSmiling ? '#fbbf24' : (zone.color || '#38bdf8');
+      if (isSmiling) {
+        ctx.shadowColor = 'rgba(251, 191, 36, 0.8)';
+        ctx.shadowBlur = 10;
+      }
       ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+      // HUD corner accents
+      const cornerLen = Math.min(16, boxW * 0.25);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = isSmiling ? '#f59e0b' : '#38bdf8';
+      // Top-left
+      ctx.beginPath();
+      ctx.moveTo(boxX, boxY + cornerLen);
+      ctx.lineTo(boxX, boxY);
+      ctx.lineTo(boxX + cornerLen, boxY);
+      ctx.stroke();
+      // Top-right
+      ctx.beginPath();
+      ctx.moveTo(boxX + boxW - cornerLen, boxY);
+      ctx.lineTo(boxX + boxW, boxY);
+      ctx.lineTo(boxX + boxW, boxY + cornerLen);
+      ctx.stroke();
+      // Bottom-left
+      ctx.beginPath();
+      ctx.moveTo(boxX, boxY + boxH - cornerLen);
+      ctx.lineTo(boxX, boxY + boxH);
+      ctx.lineTo(boxX + cornerLen, boxY + boxH);
+      ctx.stroke();
+      // Bottom-right
+      ctx.beginPath();
+      ctx.moveTo(boxX + boxW - cornerLen, boxY + boxH);
+      ctx.lineTo(boxX + boxW, boxY + boxH);
+      ctx.lineTo(boxX + boxW, boxY + boxH - cornerLen);
+      ctx.stroke();
 
       // Mouth indicator
       if (analysis.metrics.mouthBox) {
         const mb = analysis.metrics.mouthBox;
-        const mRelX = Math.max(0, (mb.x - zonePixelX) / zonePixelW);
-        const mRelY = Math.max(0, (mb.y - zonePixelY) / zonePixelH);
-        const mRelW = mb.width / zonePixelW;
-        const mRelH = mb.height / zonePixelH;
+        const mNormX = mb.x / pw;
+        const mNormY = mb.y / ph;
+        const mNormW = mb.width / pw;
+        const mNormH = mb.height / ph;
 
-        ctx.strokeStyle = analysis.isSmiling ? '#f59e0b' : '#ec4899';
-        ctx.lineWidth = 2.5;
-        ctx.strokeRect(mRelX * cw, mRelY * ch, mRelW * cw, mRelH * ch);
+        const mBoxX = Math.max(2, ((mNormX - cropNormX) / cropNormW) * cw);
+        const mBoxY = Math.max(2, ((mNormY - cropNormY) / cropNormH) * ch);
+        const mBoxW = Math.max(10, (mNormW / cropNormW) * cw);
+        const mBoxH = Math.max(6, (mNormH / cropNormH) * ch);
+
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = isSmiling ? '#f59e0b' : '#f43f5e';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(mBoxX, mBoxY, mBoxW, mBoxH);
       }
+
+      // Small Badge above face
+      if (isSmiling) {
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        const badgeY = Math.max(16, boxY - 8);
+        ctx.roundRect(boxX, badgeY - 14, Math.min(100, boxW), 16, 4);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText(`😁 CƯỜI ${Math.round(analysis.smileScore * 100)}%`, boxX + 4, badgeY - 2);
+      }
+
       ctx.restore();
     }
 
     // Winner effect or Locked overlay
     if (isWinner) {
       ctx.save();
-      ctx.fillStyle = 'rgba(251, 191, 36, 0.22)';
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.28)';
       ctx.fillRect(0, 0, cw, ch);
       ctx.restore();
     } else if (isLocked) {
       ctx.save();
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.60)';
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
       ctx.fillRect(0, 0, cw, ch);
       ctx.restore();
     }

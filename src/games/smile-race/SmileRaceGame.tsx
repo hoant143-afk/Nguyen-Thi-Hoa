@@ -80,7 +80,7 @@ interface SmileRaceGameProps {
 const DEFAULT_SETTINGS: SmileCalibrationSettings = {
   smileThreshold: 0.55,
   markerThreshold: 0.30,
-  requiredStableFrames: 2,
+  requiredStableFrames: 3,
   tieThresholdMs: 200,
   stealMode: 'TEACHER_SELECT',
   stealRoundingMode: 'FLOOR',
@@ -146,8 +146,29 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showHowToPlay, setShowHowToPlay] = useState<boolean>(false);
 
-  const activeTeams = teams.slice(0, teamCount);
+  const activeTeams = React.useMemo(() => teams.slice(0, teamCount), [teams, teamCount]);
   const currentQuestion = questions[currentQuestionIndex] || questions[0];
+
+  // Stable references for computer vision detection loop to prevent stale closures & re-render drops
+  const activeTeamsRef = useRef(activeTeams);
+  activeTeamsRef.current = activeTeams;
+
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
+  const gameStateRef = useRef(gameState);
+  gameStateRef.current = gameState;
+
+  const winnerTeamRef = useRef(winnerTeam);
+  winnerTeamRef.current = winnerTeam;
+
+  const raceStartTimestampRef = useRef(raceStartTimestamp);
+  raceStartTimestampRef.current = raceStartTimestamp;
+
+  const isWinnerLockedRef = useRef<boolean>(false);
+  const stableFramesRef = useRef<Map<string, number>>(new Map());
+  const candidateRef = useRef<{ teamId: string; timestamp: number; smileScore: number } | null>(null);
+  const winTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load question banks
   useEffect(() => {
@@ -235,6 +256,35 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
     }
   };
 
+  // Lock room winner, trigger celebration and transition to Question
+  const lockRoomWinner = useCallback((team: SmileTeam, reactionTimeMs: number) => {
+    if (isWinnerLockedRef.current) return;
+    isWinnerLockedRef.current = true;
+    candidateRef.current = null;
+
+    soundService.playSmileWinner();
+    setWinnerTeam(team);
+    setWinnerReactionTimeMs(reactionTimeMs);
+    setGameState('WINNER_LOCKED');
+
+    confetti({
+      particleCount: 90,
+      spread: 75,
+      origin: { y: 0.6 },
+    });
+
+    if (winTimeoutRef.current) {
+      clearTimeout(winTimeoutRef.current);
+    }
+    // Transition to answering after 700ms (fast & crisp)
+    winTimeoutRef.current = setTimeout(() => {
+      setQuestionTimer(settingsRef.current.questionTimeLimitSeconds);
+      setSelectedAnswer(null);
+      setGameState('ANSWERING');
+      winTimeoutRef.current = null;
+    }, 700);
+  }, []);
+
   // Room-based Computer Vision Detection Loop
   useEffect(() => {
     if (!['SETUP', 'READY', 'COUNTDOWN', 'DETECTING', 'TIE'].includes(gameState)) {
@@ -245,23 +295,22 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
       return;
     }
 
-    const stableFramesMap = new Map<string, number>();
-    const candidatesMap = new Map<string, { timestamp: number; smileScore: number }>();
-    let tieCheckTimeout: NodeJS.Timeout | null = null;
-
     const runRoomDetection = async () => {
       if (videoRef.current && videoRef.current.readyState >= 2) {
         const detector = detectorRef.current;
+        const currentActiveTeams = activeTeamsRef.current;
+        const currentThreshold = settingsRef.current.smileThreshold;
+
         // Analyze each team room's zone independently!
-        const analyses = await detector.analyzeTeamZones(videoRef.current, activeTeams, settings.smileThreshold);
+        const analyses = await detector.analyzeTeamZones(videoRef.current, currentActiveTeams, currentThreshold);
         setZoneAnalyses(analyses);
 
-        // Render each room's camera viewport on its dedicated canvas
+        // Render each room's camera viewport on its dedicated canvas with 1:1 aspect ratio!
         analyses.forEach((analysis) => {
           const roomCanvas = roomCanvasRefs.current[analysis.teamId];
           if (roomCanvas && videoRef.current) {
-            const isThisRoomWinner = winnerTeam?.id === analysis.teamId;
-            const isThisRoomLocked = Boolean(winnerTeam && winnerTeam.id !== analysis.teamId);
+            const isThisRoomWinner = winnerTeamRef.current?.id === analysis.teamId;
+            const isThisRoomLocked = Boolean(winnerTeamRef.current && winnerTeamRef.current.id !== analysis.teamId);
             detector.renderZoneToCanvas(
               videoRef.current,
               analysis.zone,
@@ -273,46 +322,105 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
           }
         });
 
-        // Detection check: only after RUN/SMILE signal in DETECTING state!
-        if (gameState === 'DETECTING' && raceStartTimestamp !== null) {
+        // Detection check: ONLY active during 'DETECTING' phase!
+        // In 'READY', 'COUNTDOWN', 'SETUP', 'TIE', 'WINNER_LOCKED', etc.:
+        // Computer vision still renders video & smile metrics on canvas, but NEVER locks a winner!
+        const currentState = gameStateRef.current;
+        const isDetectingActive =
+          currentState === 'DETECTING' &&
+          !winnerTeamRef.current &&
+          !isWinnerLockedRef.current;
+
+        if (isDetectingActive) {
           const now = performance.now();
+          const raceStart = raceStartTimestampRef.current || 0;
+          const elapsedSinceStart = raceStart > 0 ? now - raceStart : 0;
 
-          analyses.forEach((analysis) => {
-            const teamId = analysis.teamId;
-            const hasFace = Boolean(analysis.metrics.faceDetected);
+          // Enforce 180ms physiological reaction time floor after whistle ("😁 CƯỜI!")
+          // Prevents someone with an existing face shape or pre-race expression from falsely winning at t=0ms
+          if (elapsedSinceStart < 180) {
+            stableFramesRef.current.clear();
+            candidateRef.current = null;
+          } else {
+            const minStableFrames = Math.max(3, settingsRef.current.requiredStableFrames || 3);
 
-            // Empty room / no face detected: immediately reset stable frames and candidate state
-            if (!hasFace) {
-              stableFramesMap.set(teamId, 0);
-              candidatesMap.delete(teamId);
-              return;
-            }
+            // 1. Process each room analysis
+            analyses.forEach((analysis) => {
+              const teamId = analysis.teamId;
+              const hasFace = Boolean(analysis.metrics.faceDetected);
 
-            // Check if this room has achieved a valid smile gesture exceeding threshold
-            if (analysis.isSmiling && analysis.smileScore >= settings.smileThreshold) {
-              const currentFrames = (stableFramesMap.get(teamId) || 0) + 1;
-              stableFramesMap.set(teamId, currentFrames);
+              if (!hasFace) {
+                stableFramesRef.current.set(teamId, 0);
+                return;
+              }
 
-              if (currentFrames >= settings.requiredStableFrames) {
-                if (!candidatesMap.has(teamId)) {
-                  candidatesMap.set(teamId, {
-                    timestamp: now,
-                    smileScore: analysis.smileScore,
-                  });
+              if (analysis.isSmiling && analysis.smileScore >= currentThreshold) {
+                const currentFrames = (stableFramesRef.current.get(teamId) || 0) + 1;
+                stableFramesRef.current.set(teamId, currentFrames);
+
+                // Sustained smile qualification:
+                // Must hold genuine smile for at least minStableFrames (eliminates 1-frame glitches/talking)
+                if (currentFrames >= minStableFrames) {
+                  if (!candidateRef.current && !isWinnerLockedRef.current) {
+                    candidateRef.current = {
+                      teamId,
+                      timestamp: now,
+                      smileScore: analysis.smileScore,
+                    };
+                  }
                 }
-
-                // If candidate registered, trigger tie evaluation window
-                if (!tieCheckTimeout) {
-                  tieCheckTimeout = setTimeout(() => {
-                    evaluateRoomCandidates(candidatesMap);
-                  }, settings.tieThresholdMs);
+              } else {
+                // Smile dropped below threshold
+                stableFramesRef.current.set(teamId, 0);
+                // If this room was the pending candidate and stopped smiling during tie grace window, cancel!
+                if (candidateRef.current?.teamId === teamId) {
+                  candidateRef.current = null;
                 }
               }
-            } else {
-              const currentFrames = stableFramesMap.get(teamId) || 0;
-              stableFramesMap.set(teamId, Math.max(0, currentFrames - 1));
+            });
+
+            // 2. Evaluate candidate for Winner vs Tie directly inside the loop
+            if (candidateRef.current && !isWinnerLockedRef.current) {
+              const candidate = candidateRef.current;
+              const tieGraceMs = Math.max(150, settingsRef.current.tieThresholdMs || 200);
+
+              // Check if another room also achieved a sustained smile within tie window
+              let tieCandidate: SmileTeam | null = null;
+              for (const a of analyses) {
+                if (a.teamId !== candidate.teamId && a.isSmiling && a.smileScore >= currentThreshold) {
+                  const frames = stableFramesRef.current.get(a.teamId) || 0;
+                  if (frames >= minStableFrames) {
+                    const other = currentActiveTeams.find((t) => t.id === a.teamId);
+                    if (other) {
+                      tieCandidate = other;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (tieCandidate) {
+                // Tie: Both rooms sustained a smile simultaneously!
+                candidateRef.current = null;
+                const candTeam = currentActiveTeams.find((t) => t.id === candidate.teamId);
+                if (candTeam) {
+                  soundService.playWrong();
+                  setTieTeamsList([candTeam, tieCandidate]);
+                  setGameState('TIE');
+                }
+              } else if (now - candidate.timestamp >= tieGraceMs) {
+                // Decisive Winner: Held genuine smile throughout the tie grace window!
+                const winner = currentActiveTeams.find((t) => t.id === candidate.teamId);
+                if (winner) {
+                  const reactionTime = raceStart
+                    ? Math.max(180, Math.round(candidate.timestamp - raceStart))
+                    : 350;
+                  candidateRef.current = null;
+                  lockRoomWinner(winner, reactionTime);
+                }
+              }
             }
-          });
+          }
         }
       }
 
@@ -326,73 +434,58 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
         cancelAnimationFrame(animFrameRef.current);
         animFrameRef.current = null;
       }
-      if (tieCheckTimeout) {
-        clearTimeout(tieCheckTimeout);
+    };
+  }, [gameState, lockRoomWinner]);
+
+  // Keyboard shortcut listener for Teacher: Keys 1, 2, 3, 4 to buzz immediately, Space to countdown
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      if (['READY', 'DETECTING'].includes(gameState) && !isWinnerLockedRef.current) {
+        if (e.key === '1' && activeTeams[0]) {
+          lockRoomWinner(activeTeams[0], 280);
+        } else if (e.key === '2' && activeTeams[1]) {
+          lockRoomWinner(activeTeams[1], 280);
+        } else if (e.key === '3' && activeTeams[2]) {
+          lockRoomWinner(activeTeams[2], 280);
+        } else if (e.key === '4' && activeTeams[3]) {
+          lockRoomWinner(activeTeams[3], 280);
+        } else if (e.code === 'Space') {
+          e.preventDefault();
+          handleStartCountdown();
+        }
+      } else if (gameState === 'ANSWERING') {
+        // Teacher or winner can also press 1-4 or A-D to answer
+        if ((e.key === '1' || e.key.toLowerCase() === 'a') && currentQuestion.options[0]) {
+          handleSelectAnswer(0);
+        } else if ((e.key === '2' || e.key.toLowerCase() === 'b') && currentQuestion.options[1]) {
+          handleSelectAnswer(1);
+        } else if ((e.key === '3' || e.key.toLowerCase() === 'c') && currentQuestion.options[2]) {
+          handleSelectAnswer(2);
+        } else if ((e.key === '4' || e.key.toLowerCase() === 'd') && currentQuestion.options[3]) {
+          handleSelectAnswer(3);
+        }
       }
     };
-  }, [gameState, raceStartTimestamp, activeTeams, settings, winnerTeam]);
-
-  // Evaluate candidate rooms for Winner vs Tie
-  const evaluateRoomCandidates = (candidatesMap: Map<string, { timestamp: number; smileScore: number }>) => {
-    if (candidatesMap.size === 0) return;
-
-    const list = Array.from(candidatesMap.entries())
-      .map(([teamId, data]) => ({
-        team: activeTeams.find((t) => t.id === teamId)!,
-        ...data,
-      }))
-      .filter((item) => !!item.team);
-
-    if (list.length === 0) return;
-
-    // Check Tie
-    if (list.length >= 2) {
-      list.sort((a, b) => a.timestamp - b.timestamp);
-      const diff = Math.abs(list[1].timestamp - list[0].timestamp);
-      if (diff <= settings.tieThresholdMs) {
-        soundService.playWrong();
-        setTieTeamsList([list[0].team, list[1].team]);
-        setGameState('TIE');
-        return;
-      }
-    }
-
-    // Single room winner
-    list.sort((a, b) => a.timestamp - b.timestamp);
-    const winnerData = list[0];
-    const reactionTime = raceStartTimestamp ? Math.round(winnerData.timestamp - raceStartTimestamp) : 400;
-
-    lockRoomWinner(winnerData.team, reactionTime);
-  };
-
-  // Lock room winner, trigger celebration and transition to Question
-  const lockRoomWinner = (team: SmileTeam, reactionTimeMs: number) => {
-    soundService.playSmileWinner();
-    setWinnerTeam(team);
-    setWinnerReactionTimeMs(reactionTimeMs);
-    setGameState('WINNER_LOCKED');
-
-    confetti({
-      particleCount: 65,
-      spread: 70,
-      origin: { y: 0.6 },
-    });
-
-    // Transition to answering after 1.8 seconds
-    setTimeout(() => {
-      setQuestionTimer(settings.questionTimeLimitSeconds);
-      setSelectedAnswer(null);
-      setGameState('ANSWERING');
-    }, 1800);
-  };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameState, activeTeams, currentQuestion, lockRoomWinner]);
 
   // Teacher manual override / buzzer click on a room
   const handleManualSelectWinner = (team: SmileTeam) => {
-    lockRoomWinner(team, 650);
+    lockRoomWinner(team, 300);
   };
 
   // Start Countdown: 3 -> 2 -> 1 -> 😁 CƯỜI!
   const handleStartCountdown = () => {
+    isWinnerLockedRef.current = false;
+    candidateRef.current = null;
+    stableFramesRef.current.clear();
+    if (winTimeoutRef.current) {
+      clearTimeout(winTimeoutRef.current);
+      winTimeoutRef.current = null;
+    }
     setWinnerTeam(null);
     setWinnerReactionTimeMs(null);
     setRaceStartTimestamp(null);
@@ -415,7 +508,12 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
         soundService.playRunHorn();
       } else {
         clearInterval(countTimer);
-        setRaceStartTimestamp(performance.now());
+        const nowStart = performance.now();
+        setRaceStartTimestamp(nowStart);
+        raceStartTimestampRef.current = nowStart;
+        candidateRef.current = null;
+        stableFramesRef.current.clear();
+        isWinnerLockedRef.current = false;
         setGameState('DETECTING');
       }
     }, 900);
@@ -499,6 +597,15 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
 
   const handleProceedNext = () => {
     detectorRef.current.resetBaseline();
+    isWinnerLockedRef.current = false;
+    candidateRef.current = null;
+    stableFramesRef.current.clear();
+    setRaceStartTimestamp(null);
+    raceStartTimestampRef.current = null;
+    if (winTimeoutRef.current) {
+      clearTimeout(winTimeoutRef.current);
+      winTimeoutRef.current = null;
+    }
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex((prev) => prev + 1);
       setWinnerTeam(null);
@@ -514,6 +621,15 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
   };
 
   const handleStartGameFromSetup = () => {
+    isWinnerLockedRef.current = false;
+    candidateRef.current = null;
+    stableFramesRef.current.clear();
+    setRaceStartTimestamp(null);
+    raceStartTimestampRef.current = null;
+    if (winTimeoutRef.current) {
+      clearTimeout(winTimeoutRef.current);
+      winTimeoutRef.current = null;
+    }
     if (selectedLessonId) {
       const lesson = lessons.find((l) => l.id === selectedLessonId);
       if (lesson && lesson.questions.length > 0) {
@@ -777,27 +893,77 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
         {/* ============================================================ */}
         {['READY', 'COUNTDOWN', 'DETECTING', 'WINNER_LOCKED', 'TIE'].includes(gameState) && (
           <div className="flex-1 flex flex-col gap-3 min-h-[460px]">
+            {/* Active Question Banner: Shows the contested question clearly */}
+            <div className="bg-slate-900/95 border border-amber-500/30 rounded-2xl p-3 sm:p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-400 font-black text-xs">
+                    CÂU {currentQuestionIndex + 1}/{questions.length}
+                  </span>
+                  {currentQuestion.isSpecial && (
+                    <span className="px-2 py-0.5 rounded-lg bg-rose-500/20 text-rose-400 font-extrabold text-[11px]">
+                      ⭐ CÂU ĐẶC BIỆT +{currentQuestion.specialPoints || settings.specialPoints}Đ
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-400 hidden sm:inline">
+                    (Phím tắt: <strong>1, 2, 3, 4</strong> để chọn thắng tức thì)
+                  </span>
+                </div>
+                <h3 className="text-sm sm:text-base font-bold text-white leading-snug">
+                  {currentQuestion.question}
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-black text-amber-300 bg-amber-950/60 border border-amber-500/40 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-400 fill-current animate-bounce" />
+                  <span>Phòng nào cười trước giành quyền trả lời!</span>
+                </span>
+              </div>
+            </div>
+
             {/* Arena Header & Instructions */}
             <div className="bg-slate-900/80 border border-slate-800 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-xs sm:text-sm font-black text-slate-200 uppercase tracking-wide">
-                  {gameState === 'READY' && '🎯 SẴN SÀNG: ĐẠI DIỆN CÁC PHÒNG ĐỨNG ĐÚNG KHUNG HÌNH VÀ CHUẨN BỊ'}
+                  {gameState === 'READY' && '⚡ ĐẤU TRƯỜNG ĐANG MỞ: PHÒNG NÀO CƯỜI TRƯỚC SẼ GIÀNH QUYỀN TRẢ LỜI NGAY!'}
                   {gameState === 'COUNTDOWN' && '⚡ ĐẾM NGƯỢC... CHUẨN BỊ NỤ CƯỜI RẠNG RỠ!'}
                   {gameState === 'DETECTING' && '😁 CƯỜI ĐI NÀO! PHÒNG NÀO CƯỜI TRƯỚC SẼ GIÀNH QUYỀN TRẢ LỜI!'}
-                  {gameState === 'WINNER_LOCKED' && `👑 ${winnerTeam?.name} ĐÃ CƯỜI TRƯỚC! GIÀNH QUYỀN TRẢ LỜI!`}
+                  {gameState === 'WINNER_LOCKED' && `👑 ${winnerTeam?.name} ĐÃ CƯỜI TRƯỚC! ĐANG MỞ CÂU HỎI...`}
                   {gameState === 'TIE' && '⚡ HAI PHÒNG CƯỜI CÙNG LÚC! BẤT PHÂN THẮNG BẠI!'}
                 </span>
               </div>
 
               {/* Ready Trigger Button */}
               {gameState === 'READY' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleStartCountdown}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 flex items-center gap-1.5 cursor-pointer transition-all uppercase tracking-wider transform hover:scale-105 active:scale-95"
+                    title="Bấm hoặc gõ phím Space để đếm ngược 3-2-1"
+                  >
+                    <Zap className="w-3.5 h-3.5 fill-current" />
+                    <span>ĐẾM NGƯỢC 3-2-1 (Phím Cách)</span>
+                  </button>
+                </div>
+              )}
+
+              {gameState === 'WINNER_LOCKED' && (
                 <button
-                  onClick={handleStartCountdown}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/25 flex items-center gap-2 cursor-pointer transition-all uppercase tracking-wider transform hover:scale-105 active:scale-95"
+                  onClick={() => {
+                    if (winTimeoutRef.current) {
+                      clearTimeout(winTimeoutRef.current);
+                      winTimeoutRef.current = null;
+                    }
+                    setQuestionTimer(settingsRef.current.questionTimeLimitSeconds);
+                    setSelectedAnswer(null);
+                    setGameState('ANSWERING');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/30 flex items-center gap-1.5 cursor-pointer transition-all animate-pulse"
                 >
-                  <Zap className="w-4 h-4 fill-current" />
-                  <span>BẮT ĐẦU TRANH QUYỀN (3 - 2 - 1 - CƯỜI)</span>
+                  <Crown className="w-4 h-4 fill-current" />
+                  <span>VÀO TRẢ LỜI NGAY ➔</span>
                 </button>
               )}
 
@@ -834,7 +1000,7 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
                 return (
                   <div
                     key={team.id}
-                    className={`relative rounded-3xl border-3 flex flex-col justify-between overflow-hidden transition-all duration-300 bg-slate-900/90 shadow-xl ${
+                    className={`relative rounded-3xl border-3 flex flex-col justify-between overflow-hidden transition-all duration-300 bg-slate-900/90 shadow-xl max-w-[560px] mx-auto w-full ${
                       isWinner
                         ? 'border-amber-400 ring-4 ring-amber-400/50 scale-[1.02] shadow-amber-500/30'
                         : isLocked
@@ -878,15 +1044,15 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
                       </div>
                     </div>
 
-                    {/* Room Camera Viewport */}
-                    <div className="relative flex-1 bg-slate-950 flex items-center justify-center overflow-hidden min-h-[220px]">
+                    {/* Room Camera Viewport: aspect-[4/3] compact & crisp, NO facial stretching! */}
+                    <div className="relative w-full aspect-[4/3] max-h-[260px] sm:max-h-[300px] mx-auto bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center p-0.5">
                       <canvas
                         ref={(el) => {
                           roomCanvasRefs.current[team.id] = el;
                         }}
-                        width={320}
-                        height={240}
-                        className="w-full h-full object-cover"
+                        width={480}
+                        height={360}
+                        className="w-full h-full block rounded-xl"
                       />
 
                       {/* Room Status Indicator Chip */}
@@ -913,9 +1079,7 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
                             ? '👤 CHƯA CÓ NGƯỜI'
                             : isSmilingNow
                             ? '😁 ĐANG CƯỜI!'
-                            : gameState === 'DETECTING'
-                            ? '😐 CHỜ NỤ CƯỜI...'
-                            : 'SẴN SÀNG'}
+                            : 'ĐANG CHỜ NỤ CƯỜI...'}
                         </span>
                       </div>
 
@@ -924,7 +1088,7 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
                         {hasPerson ? (
                           <>
                             <span>
-                              {smilePercent >= 80 ? '🌟😁' : smilePercent >= 55 ? '😄' : smilePercent >= 30 ? '🙂' : '😐'}
+                              {smilePercent >= 80 ? '🌟😁' : smilePercent >= 50 ? '😄' : smilePercent >= 30 ? '🙂' : '😐'}
                             </span>
                             <span className="text-amber-400 font-mono">{smilePercent}%</span>
                           </>
@@ -938,7 +1102,18 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
 
                       {/* Winner Overlay for Room */}
                       {isWinner && (
-                        <div className="absolute inset-0 bg-amber-950/40 backdrop-blur-[2px] flex flex-col items-center justify-center p-3 text-center pointer-events-none animate-in fade-in zoom-in-95 duration-200">
+                        <div
+                          onClick={() => {
+                            if (winTimeoutRef.current) {
+                              clearTimeout(winTimeoutRef.current);
+                              winTimeoutRef.current = null;
+                            }
+                            setQuestionTimer(settingsRef.current.questionTimeLimitSeconds);
+                            setSelectedAnswer(null);
+                            setGameState('ANSWERING');
+                          }}
+                          className="absolute inset-0 bg-amber-950/60 backdrop-blur-[2px] flex flex-col items-center justify-center p-3 text-center pointer-events-auto cursor-pointer animate-in fade-in zoom-in-95 duration-200"
+                        >
                           <Crown className="w-12 h-12 text-amber-300 drop-shadow-md animate-bounce" />
                           <h3 className="text-lg sm:text-2xl font-black text-amber-300 drop-shadow-lg mt-1">
                             CƯỜI NHANH NHẤT!
@@ -946,6 +1121,9 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
                           <div className="text-xs sm:text-sm font-bold text-amber-100 bg-amber-500/30 px-3 py-1 rounded-full border border-amber-400/50 mt-1">
                             Phản xạ: <span className="font-mono text-cyan-300 font-extrabold">{winnerReactionTimeMs}ms</span>
                           </div>
+                          <span className="mt-2.5 px-3.5 py-1 rounded-xl bg-amber-400 text-slate-950 text-xs font-black shadow-md flex items-center gap-1 hover:scale-105 transition-all">
+                            VÀO TRẢ LỜI NGAY ➔
+                          </span>
                         </div>
                       )}
 
@@ -969,7 +1147,7 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
                           <span className="font-mono text-xs font-extrabold" style={{ color: team.color }}>
                             {smilePercent}%{' '}
                             <span className="text-[10px] text-slate-400 font-normal">
-                              (Ngưỡng: {thresholdPercent}%)
+                              (Ngưỡng đạt: {thresholdPercent}%)
                             </span>
                           </span>
                         ) : (
@@ -1001,18 +1179,19 @@ export const SmileRaceGame: React.FC<SmileRaceGameProps> = ({ onBackToEduplay })
                       </div>
 
                       {/* Teacher Manual Click / Buzzer Fallback */}
-                      <div className="pt-1 flex items-center justify-between">
-                        <span className="text-[10px] text-slate-500">
-                          {isSmilingNow ? '✅ Đủ điều kiện cười' : 'Chờ nụ cười tươi'}
+                      <div className="pt-1 flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {isSmilingNow ? '✅ Cười đạt chuẩn!' : 'Nhận diện tự động'}
                         </span>
                         <button
                           type="button"
                           onClick={() => handleManualSelectWinner(team)}
                           disabled={gameState !== 'READY' && gameState !== 'DETECTING'}
-                          className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-bold border border-slate-700 transition-all cursor-pointer"
-                          title="Bấm chọn phòng này nếu camera bị mờ hoặc không nhận"
+                          className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-400 text-amber-300 hover:text-slate-950 text-[11px] font-black border border-amber-500/40 transition-all cursor-pointer shadow-sm active:scale-95 flex items-center gap-1"
+                          title={`Bấm chọn phòng này thắng ngay hoặc ấn phím ${idx + 1}`}
                         >
-                          Chọn thắng thủ công
+                          <Crown className="w-3 h-3 text-amber-400" />
+                          <span>Thắng ngay (Phím {idx + 1})</span>
                         </button>
                       </div>
                     </div>

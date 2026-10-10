@@ -7,6 +7,7 @@ import { EduplayFooter } from './components/layout/EduplayFooter';
 import { EduplayHome } from './components/EduplayHome';
 import { CamRaceGame } from './games/cam-race/CamRaceGame';
 import { SmileRaceGame } from './games/smile-race/SmileRaceGame';
+import { FruitSlashGame } from './games/fruit-slash/FruitSlashGame';
 import { LuckyWheelGame } from './games/lucky-wheel/LuckyWheelGame';
 import { FastestHandGame } from './games/fastest-hand/FastestHandGame';
 import { RandomPickerGame } from './games/random-picker/RandomPickerGame';
@@ -90,6 +91,14 @@ function AppContent() {
         </GameErrorBoundary>
       )}
 
+      {/* 2b. Fruit Slash Quiz Game */}
+      {currentRoute === '/games/fruit-slash' && (
+        <GameErrorBoundary onGoHome={() => navigateTo('/')}>
+          <FruitSlashGame onBackToEduplay={() => navigateTo('/')} />
+          <CloudStatusBanner />
+        </GameErrorBoundary>
+      )}
+
       {/* 3. Lucky Wheel Game */}
       {currentRoute === '/games/lucky-wheel' && (
         <GameErrorBoundary onGoHome={() => navigateTo('/')}>
@@ -149,6 +158,7 @@ function AppContent() {
       {/* 9. Default: Platform Home */}
       {currentRoute !== '/games/cam-race' &&
         currentRoute !== '/games/smile-race' &&
+        currentRoute !== '/games/fruit-slash' &&
         currentRoute !== '/games/lucky-wheel' &&
         currentRoute !== '/games/fastest-hand' &&
         currentRoute !== '/games/random-picker' &&

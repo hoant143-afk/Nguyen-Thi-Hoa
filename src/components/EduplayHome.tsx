@@ -7,6 +7,7 @@ import {
   Sparkles,
   Trophy,
   Users,
+  Swords,
   Play,
   ArrowRight,
   GraduationCap,
@@ -32,6 +33,7 @@ const ICONS_MAP: Record<string, React.ReactNode> = {
   Sparkles: <Sparkles className="w-6 h-6" />,
   Trophy: <Trophy className="w-6 h-6" />,
   Users: <Users className="w-6 h-6" />,
+  Swords: <Swords className="w-6 h-6" />,
 };
 
 export const EduplayHome: React.FC<EduplayHomeProps> = ({
@@ -41,7 +43,7 @@ export const EduplayHome: React.FC<EduplayHomeProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
   const categories = [
-    { id: 'ALL', label: 'Tất cả trò chơi (6)' },
+    { id: 'ALL', label: 'Tất cả trò chơi (7)' },
     { id: 'Vận động & AI', label: '🏃 Vận động & AI' },
     { id: 'Trí tuệ & Trắc nghiệm', label: '⚡ Trí tuệ' },
     { id: 'May mắn & Hoạt náo', label: '🎡 Hoạt náo' },
@@ -117,7 +119,7 @@ export const EduplayHome: React.FC<EduplayHomeProps> = ({
             <div className="p-3 rounded-xl bg-white/90 border border-rose-200/80 flex items-center gap-2.5 shadow-xs">
               <span className="w-2 h-2 rounded-full bg-rose-500" />
               <div>
-                <p className="text-xs font-black text-slate-900">6 Trò chơi phong phú</p>
+                <p className="text-xs font-black text-slate-900">7 Trò chơi phong phú</p>
                 <p className="text-[10px] text-slate-500">Đáp ứng mọi môn học</p>
               </div>
             </div>
