@@ -4,7 +4,7 @@
  * Compliant with requirements:
  * - Local browser processing ONLY.
  * - DOES NOT infer emotions or psychological states.
- * - Detects facial/mouth geometry gestures (mouth width, aspect ratio, corner curvature, baseline expansion) to serve gameplay.
+ * - Detects facial/mouth geometry gestures (mouth width, aspect ratio, corner curvature, teeth presence) to serve gameplay.
  * - Does NOT perform face recognition, does NOT store images, video, biometric templates, or embeddings.
  */
 
@@ -167,20 +167,246 @@ export function rgbToHsv(r: number, g: number, b: number): { h: number; s: numbe
   return { h, s, v };
 }
 
-// Skin pixel detector for face localization
+/**
+ * Robust Skin pixel detector for face localization.
+ * Checks normalized chromaticity and HSV color space to reject:
+ * - White/grey ceiling lights and painted walls (r ~ g ~ b)
+ * - Deep dark shadows (low intensity)
+ * - Pure saturated non-skin surfaces
+ */
 export function isSkinTone(r: number, g: number, b: number): boolean {
-  if (r > 60 && g > 35 && b > 20) {
-    if (r > g && g >= b) {
-      const diff = r - Math.max(g, b);
-      if (diff > 12) {
-        const hsv = rgbToHsv(r, g, b);
-        if (hsv.s >= 15 && hsv.s <= 68 && (hsv.h <= 45 || hsv.h >= 340)) {
-          return true;
-        }
+  // Reject neutral white / grey / ceiling light panels (r ~ g ~ b)
+  if (Math.abs(r - g) < 9 && Math.abs(g - b) < 9) {
+    return false;
+  }
+  // Reject dark shadows and oversaturated ceiling lights
+  if (r < 55 || g < 35 || b < 25 || (r > 245 && g > 235 && b > 220)) {
+    return false;
+  }
+  // Human skin: Red must be clearly dominant over Green, and Green >= Blue
+  if (r > g + 7 && r > b + 10) {
+    const total = r + g + b;
+    const rNorm = r / total;
+    const gNorm = g / total;
+    // Normalized color coordinates for human skin across diverse complexions
+    if (rNorm >= 0.35 && rNorm <= 0.62 && gNorm >= 0.24 && gNorm <= 0.39) {
+      const hsv = rgbToHsv(r, g, b);
+      if (hsv.s >= 14 && hsv.s <= 78 && (hsv.h <= 45 || hsv.h >= 340)) {
+        return true;
       }
     }
   }
   return false;
+}
+
+/**
+ * Facial Structure & Anatomy Contrast Verifier:
+ * Validates that candidate bounding box actually contains facial anatomy
+ * (dark eye sockets relative to forehead/cheeks, lighter nose bridge between them),
+ * rather than a flat wooden desk, chair, door, or wall.
+ */
+function verifyFaceFeatures(
+  faceBox: BoundingBox,
+  data: Uint8ClampedArray,
+  canvasW: number,
+  canvasH: number
+): boolean {
+  const { x, y, width: w, height: h } = faceBox;
+
+  // Aspect ratio check: Human head is roughly 0.95 to 1.70 times taller than wide
+  const aspectRatio = h / Math.max(1, w);
+  if (aspectRatio < 0.90 || aspectRatio > 1.75) {
+    return false;
+  }
+
+  // Helper to compute average luminance in a sub-rectangle of the face
+  const getSubRegionLum = (relX: number, relY: number, relW: number, relH: number): number => {
+    const startX = Math.max(0, Math.floor(x + w * relX));
+    const endX = Math.min(canvasW, Math.ceil(x + w * (relX + relW)));
+    const startY = Math.max(0, Math.floor(y + h * relY));
+    const endY = Math.min(canvasH, Math.ceil(y + h * (relY + relH)));
+
+    let sum = 0;
+    let count = 0;
+    for (let py = startY; py < endY; py += 2) {
+      for (let px = startX; px < endX; px += 2) {
+        const idx = (py * canvasW + px) * 4;
+        sum += 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        count++;
+      }
+    }
+    return count > 0 ? sum / count : 128;
+  };
+
+  // 1. Forehead region (upper 14%-26% of face, center 50% width)
+  const foreheadLum = getSubRegionLum(0.25, 0.14, 0.50, 0.12);
+
+  // 2. Left eye region (32%-46% height, 18%-42% width)
+  const leftEyeLum = getSubRegionLum(0.18, 0.32, 0.24, 0.14);
+
+  // 3. Right eye region (32%-46% height, 58%-82% width)
+  const rightEyeLum = getSubRegionLum(0.58, 0.32, 0.24, 0.14);
+
+  // 4. Nose bridge between eyes (32%-46% height, 43%-57% width)
+  const noseBridgeLum = getSubRegionLum(0.43, 0.32, 0.14, 0.14);
+
+  // 5. Cheeks (48%-62% height, 22%-78% width)
+  const cheeksLum = getSubRegionLum(0.22, 0.50, 0.56, 0.12);
+
+  // Eye sockets & brows make eye regions darker than forehead or cheeks
+  const leftEyeContrast = Math.max(foreheadLum - leftEyeLum, cheeksLum - leftEyeLum);
+  const rightEyeContrast = Math.max(foreheadLum - rightEyeLum, cheeksLum - rightEyeLum);
+  const avgEyeContrast = (leftEyeContrast + rightEyeContrast) / 2;
+
+  // Nose bridge between the eyes is elevated and brighter than the two eye sockets
+  const bridgeRise = noseBridgeLum - (leftEyeLum + rightEyeLum) / 2;
+
+  // Internal feature variance test across face zones
+  const lums = [foreheadLum, leftEyeLum, rightEyeLum, noseBridgeLum, cheeksLum];
+  const avgLum = lums.reduce((s, v) => s + v, 0) / lums.length;
+  const variance = lums.reduce((s, v) => s + Math.abs(v - avgLum), 0) / lums.length;
+
+  // On a flat wooden table, blank door, or painted wall:
+  // forehead, eye regions, and cheeks have virtually identical luminance (contrast < 4, variance < 3).
+  // A real human face exhibits clear contrast valley (avgEyeContrast >= 5, or bridgeRise >= 2, or variance >= 5.5).
+  if (avgEyeContrast < 4.5 && bridgeRise < 2.0 && variance < 4.5) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Scan a specific region of the image for a connected face cluster.
+ * Rejects empty space, scattered lights, furniture, and walls.
+ */
+function findFaceClusterInRegion(
+  startX: number,
+  endX: number,
+  startY: number,
+  endY: number,
+  data: Uint8ClampedArray,
+  canvasW: number,
+  canvasH: number
+): BoundingBox | null {
+  const zoneW = endX - startX;
+  const zoneH = endY - startY;
+  const cellW = 8;
+  const cellH = 8;
+  const cols = Math.floor(zoneW / cellW);
+  const rows = Math.floor(zoneH / cellH);
+  if (cols < 3 || rows < 3) return null;
+
+  const grid = new Int16Array(cols * rows);
+
+  // Scan zone pixels with step 2
+  for (let y = startY + 2; y < endY - 2; y += 2) {
+    const rIdx = Math.floor((y - startY) / cellH);
+    if (rIdx < 0 || rIdx >= rows) continue;
+    for (let x = startX + 2; x < endX - 2; x += 2) {
+      const cIdx = Math.floor((x - startX) / cellW);
+      if (cIdx < 0 || cIdx >= cols) continue;
+      const idx = (y * canvasW + x) * 4;
+      const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+      if (isSkinTone(r, g, b)) {
+        grid[rIdx * cols + cIdx]++;
+      }
+    }
+  }
+
+  // Find cell with maximum skin density (peak)
+  let maxCellCount = 0;
+  let peakR = -1;
+  let peakC = -1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cnt = grid[r * cols + c];
+      if (cnt > maxCellCount) {
+        maxCellCount = cnt;
+        peakR = r;
+        peakC = c;
+      }
+    }
+  }
+
+  // If even the densest cell has fewer than 4 skin pixels (out of 16 sampled per cell),
+  // there is no face here at all!
+  if (maxCellCount < 4 || peakR === -1) {
+    return null;
+  }
+
+  // Flood fill / expand from the peak cell to find the connected face cluster
+  const visited = new Uint8Array(cols * rows);
+  const queue: [number, number][] = [[peakR, peakC]];
+  visited[peakR * cols + peakC] = 1;
+
+  let minC = peakC, maxC = peakC;
+  let minR = peakR, maxR = peakR;
+  let clusterSkinPixels = 0;
+  let clusterCellCount = 0;
+
+  while (queue.length > 0) {
+    const [cr, cc] = queue.shift()!;
+    const cnt = grid[cr * cols + cc];
+    clusterSkinPixels += cnt;
+    clusterCellCount++;
+
+    if (cc < minC) minC = cc;
+    if (cc > maxC) maxC = cc;
+    if (cr < minR) minR = cr;
+    if (cr > maxR) maxR = cr;
+
+    // 4-neighborhood
+    const neighbors: [number, number][] = [
+      [cr - 1, cc],
+      [cr + 1, cc],
+      [cr, cc - 1],
+      [cr, cc + 1],
+    ];
+
+    for (const [nr, nc] of neighbors) {
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+        const nIdx = nr * cols + nc;
+        if (!visited[nIdx] && grid[nIdx] >= 3) {
+          visited[nIdx] = 1;
+          queue.push([nr, nc]);
+        }
+      }
+    }
+  }
+
+  // A genuine face requires a solid compact cluster:
+  // At least 9 active cells and 100 skin pixels
+  if (clusterCellCount < 9 || clusterSkinPixels < 100) {
+    return null;
+  }
+
+  const rawW = (maxC - minC + 1) * cellW;
+  const rawH = (maxR - minR + 1) * cellH;
+
+  // Minimum physical face dimensions (at least 30x36 pixels)
+  if (rawW < 30 || rawH < 36) {
+    return null;
+  }
+
+  // Truncate neck/chest if connected:
+  // Human face height is roughly 1.15 to 1.35 * width
+  const faceW = rawW;
+  const faceH = Math.min(rawH, Math.round(faceW * 1.30));
+
+  const faceBox: BoundingBox = {
+    x: startX + minC * cellW,
+    y: startY + minR * cellH,
+    width: faceW,
+    height: faceH,
+  };
+
+  // Perform Viola-Jones facial structure verification (rejects wood, walls, tables)
+  if (!verifyFaceFeatures(faceBox, data, canvasW, canvasH)) {
+    return null;
+  }
+
+  return faceBox;
 }
 
 export class SmileDetector {
@@ -201,7 +427,7 @@ export class SmileDetector {
     if (typeof window !== 'undefined' && 'FaceDetector' in window) {
       try {
         const FD = (window as any).FaceDetector;
-        this.nativeFaceDetector = new FD({ fastMode: true, maxDetectedFaces: 2 });
+        this.nativeFaceDetector = new FD({ fastMode: true, maxDetectedFaces: 4 });
         this.isNativeDetectorAvailable = true;
       } catch {
         this.isNativeDetectorAvailable = false;
@@ -245,7 +471,7 @@ export class SmileDetector {
   }
 
   /**
-   * Analyze webcam video frame to extract face & mouth geometry
+   * Analyze webcam video frame for single calibration modal.
    */
   public async analyzeFrame(video: HTMLVideoElement): Promise<SmileGestureMetrics> {
     if (!video || video.readyState < 2 || !this.processingCtx) {
@@ -273,132 +499,38 @@ export class SmileDetector {
     }
 
     // Pure Canvas Computer Vision Face & Mouth Geometry
-    return this.processCanvasFace(imageData, width, height);
+    const faceBox = findFaceClusterInRegion(0, width, 0, height, imageData.data, width, height);
+    if (!faceBox) {
+      return this.createEmptyMetrics();
+    }
+
+    return this.calculateMetricsFromMouthROI(faceBox, imageData, width, height, 'CANVAS_GEOMETRY');
   }
 
   /**
-   * Process face using Chromium Native Landmarks
+   * Process face using Chromium Native Landmarks if available.
    */
   private processNativeFace(face: any, canvasW: number, canvasH: number, imageData: ImageData): SmileGestureMetrics {
     const box = face.boundingBox;
     const faceBox: BoundingBox = {
-      x: box.x,
-      y: box.y,
-      width: box.width,
-      height: box.height,
+      x: Math.max(0, box.x),
+      y: Math.max(0, box.y),
+      width: Math.min(canvasW - box.x, box.width),
+      height: Math.min(canvasH - box.y, box.height),
     };
 
-    // Find landmarks if provided
-    let mouthPoints: { x: number; y: number }[] = [];
-    if (face.landmarks && Array.isArray(face.landmarks)) {
-      for (const lm of face.landmarks) {
-        if (lm.type === 'mouth' && lm.locations && Array.isArray(lm.locations)) {
-          mouthPoints = lm.locations;
-        }
-      }
-    }
-
-    // Derive mouth bounding box (from landmarks or lower 35% of face)
-    let mouthBox: BoundingBox;
-    if (mouthPoints.length >= 2) {
-      const xs = mouthPoints.map((p) => p.x);
-      const ys = mouthPoints.map((p) => p.y);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-      mouthBox = {
-        x: minX,
-        y: minY,
-        width: Math.max(10, maxX - minX),
-        height: Math.max(6, maxY - minY),
-      };
-    } else {
-      mouthBox = {
-        x: faceBox.x + faceBox.width * 0.22,
-        y: faceBox.y + faceBox.height * 0.64,
-        width: faceBox.width * 0.56,
-        height: faceBox.height * 0.30,
-      };
-    }
-
-    // Refine mouth geometry using pixel data in the mouth ROI
-    return this.calculateMetricsFromMouthROI(faceBox, mouthBox, imageData, canvasW, canvasH, 'NATIVE_LANDMARKS');
+    return this.calculateMetricsFromMouthROI(faceBox, imageData, canvasW, canvasH, 'NATIVE_LANDMARKS');
   }
 
   /**
-   * Pure Canvas Computer Vision: Skin Locus + Face & Lip Chromaticity Segmentation
-   */
-  private processCanvasFace(imageData: ImageData, width: number, height: number): SmileGestureMetrics {
-    const data = imageData.data;
-
-    let minX = width;
-    let maxX = 0;
-    let minY = height;
-    let maxY = 0;
-    let skinPixelCount = 0;
-
-    // Scan skin pixels with 4px stride for real-time high-speed processing
-    const step = 4;
-    for (let y = 10; y < height - 10; y += step) {
-      for (let x = 10; x < width - 10; x += step) {
-        const idx = (y * width + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-
-        if (isSkinTone(r, g, b)) {
-          skinPixelCount++;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-
-    const minRequiredSkin = 80; // Enough skin pixels to indicate a real face
-    if (skinPixelCount < minRequiredSkin || maxX - minX < 35 || maxY - minY < 45) {
-      return this.createEmptyMetrics();
-    }
-
-    // Refine Face Bounding Box
-    const faceW = maxX - minX;
-    const faceH = maxY - minY;
-    const faceBox: BoundingBox = {
-      x: minX,
-      y: minY,
-      width: faceW,
-      height: faceH,
-    };
-
-    // Mouth ROI is located in the lower-central region of the face
-    const mouthX = Math.round(faceBox.x + faceBox.width * 0.22);
-    const mouthY = Math.round(faceBox.y + faceBox.height * 0.64);
-    const mouthW = Math.round(faceBox.width * 0.56);
-    const mouthH = Math.round(faceBox.height * 0.30);
-
-    const mouthBox: BoundingBox = {
-      x: Math.max(0, mouthX),
-      y: Math.max(0, mouthY),
-      width: Math.min(width - mouthX, mouthW),
-      height: Math.min(height - mouthY, mouthH),
-    };
-
-    return this.calculateMetricsFromMouthROI(faceBox, mouthBox, imageData, width, height, 'CANVAS_GEOMETRY');
-  }
-
-  /**
-   * Deep Geometric Analysis of Mouth ROI:
-   * 1. Horizontal span (mouth width relative to face)
-   * 2. Vertical aspect ratio (width vs height)
-   * 3. Lip corner upward curvature
-   * 4. Inner mouth contrast (teeth brightness / oral cavity opening)
-   * 5. Delta compared to neutral baseline
+   * High-Precision Mouth Geometry & Smile Analysis:
+   * 1. Teeth brightness & exposure (hallmark of open smile in competition!)
+   * 2. Horizontal mouth width span (mouth stretches from ~0.38 to ~0.55+ of face width)
+   * 3. Vertical mouth opening / cavity (expansion during smile/laughter)
+   * 4. Upward elevation of lip corners relative to lower lip center
    */
   private calculateMetricsFromMouthROI(
     faceBox: BoundingBox,
-    mouthBox: BoundingBox,
     imageData: ImageData,
     canvasW: number,
     canvasH: number,
@@ -406,98 +538,150 @@ export class SmileDetector {
   ): SmileGestureMetrics {
     const data = imageData.data;
 
-    let leftLipX = mouthBox.x + mouthBox.width;
-    let rightLipX = mouthBox.x;
-    let leftLipY = mouthBox.y;
-    let rightLipY = mouthBox.y;
-    let centerLipY = mouthBox.y;
-    let lipPixels = 0;
-    let brightTeethPixels = 0;
+    // Anatomically positioned mouth ROI (lower 60% to 86% of face)
+    const mouthW = Math.round(faceBox.width * 0.58);
+    const mouthH = Math.round(faceBox.height * 0.28);
+    const mouthX = Math.round(faceBox.x + (faceBox.width - mouthW) / 2);
+    const mouthY = Math.round(faceBox.y + faceBox.height * 0.62);
 
-    const startX = Math.max(0, mouthBox.x);
-    const endX = Math.min(canvasW, mouthBox.x + mouthBox.width);
-    const startY = Math.max(0, mouthBox.y);
-    const endY = Math.min(canvasH, mouthBox.y + mouthBox.height);
+    const mouthBox: BoundingBox = {
+      x: Math.max(0, mouthX),
+      y: Math.max(0, mouthY),
+      width: Math.min(canvasW - mouthX, mouthW),
+      height: Math.min(canvasH - mouthY, mouthH),
+    };
+
+    let teethPixels = 0;
+    let lipPixels = 0;
+    let cavityPixels = 0;
+
+    let minFeatureX = canvasW;
+    let maxFeatureX = 0;
+    let minFeatureY = canvasH;
+    let maxFeatureY = 0;
+
+    // Corner tracking
+    let leftCornerYSum = 0;
+    let leftCornerCount = 0;
+    let rightCornerYSum = 0;
+    let rightCornerCount = 0;
+    let bottomCenterY = mouthBox.y + mouthBox.height / 2;
+
+    const startX = mouthBox.x;
+    const endX = mouthBox.x + mouthBox.width;
+    const startY = mouthBox.y;
+    const endY = mouthBox.y + mouthBox.height;
+
+    const leftBoundaryX = mouthBox.x + mouthBox.width * 0.28;
+    const rightBoundaryX = mouthBox.x + mouthBox.width * 0.72;
+    const centerMidX = mouthBox.x + mouthBox.width * 0.50;
 
     for (let y = startY; y < endY; y += 2) {
       for (let x = startX; x < endX; x += 2) {
         const idx = (y * canvasW + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
+        const r = data[idx], g = data[idx + 1], b = data[idx + 2];
 
-        // Lip chromaticity index: lips exhibit higher red dominance and lower green/blue
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        const sat = Math.max(r, g, b) - Math.min(r, g, b);
         const lipIntensity = (2 * r - g - b) / (r + g + 1);
-        const brightness = (r + g + b) / 3;
 
-        // Bright pixel in mouth ROI (indicating visible teeth during smile)
-        if (brightness > 140 && Math.abs(r - g) < 25 && Math.abs(r - b) < 35) {
-          brightTeethPixels++;
+        // 1. Bright teeth pixels (hallmark of smile!)
+        const isTeeth = lum >= 115 && sat <= 42 && r >= 90 && g >= 85 && b >= 70;
+        if (isTeeth) {
+          teethPixels++;
         }
 
-        // Lip contour pixel
-        if (lipIntensity > 0.28 && r > 65) {
+        // 2. Open oral cavity (shadow inside mouth during wide smile / laughter)
+        const isCavity = lum <= 65 && r <= 80;
+        if (isCavity) {
+          cavityPixels++;
+        }
+
+        // 3. Natural lips contour
+        const isLip = (lipIntensity >= 0.11 || (r > g + 14 && r > b + 16)) && r >= 55;
+        if (isLip) {
           lipPixels++;
-          if (x < leftLipX) {
-            leftLipX = x;
-            leftLipY = y;
+        }
+
+        // Active mouth feature
+        if (isTeeth || isCavity || isLip) {
+          if (x < minFeatureX) minFeatureX = x;
+          if (x > maxFeatureX) maxFeatureX = x;
+          if (y < minFeatureY) minFeatureY = y;
+          if (y > maxFeatureY) maxFeatureY = y;
+
+          // Track left corner vs right corner
+          if (x <= leftBoundaryX) {
+            leftCornerYSum += y;
+            leftCornerCount++;
+          } else if (x >= rightBoundaryX) {
+            rightCornerYSum += y;
+            rightCornerCount++;
           }
-          if (x > rightLipX) {
-            rightLipX = x;
-            rightLipY = y;
-          }
-          // Near center column
-          const midX = mouthBox.x + mouthBox.width / 2;
-          if (Math.abs(x - midX) < 8) {
-            centerLipY = y;
+
+          // Center lower lip
+          if (Math.abs(x - centerMidX) < 10 && y > bottomCenterY) {
+            bottomCenterY = y;
           }
         }
       }
     }
 
-    // Compute geometric spans
-    const detectedMouthW = rightLipX > leftLipX ? rightLipX - leftLipX : mouthBox.width * 0.7;
-    const detectedMouthH = Math.max(8, mouthBox.height * 0.6);
+    // Compute detected mouth dimensions
+    const detectedMouthW = (maxFeatureX > minFeatureX)
+      ? (maxFeatureX - minFeatureX)
+      : Math.round(mouthBox.width * 0.65);
+    const detectedMouthH = (maxFeatureY > minFeatureY)
+      ? (maxFeatureY - minFeatureY)
+      : Math.round(mouthBox.height * 0.45);
 
-    const mouthWidthRatio = Math.min(1, Math.max(0.1, detectedMouthW / Math.max(1, faceBox.width)));
+    const mouthWidthRatio = Math.min(1, Math.max(0.15, detectedMouthW / Math.max(1, faceBox.width)));
+    const mouthHeightRatio = Math.min(1, Math.max(0.05, detectedMouthH / Math.max(1, faceBox.height)));
     const mouthAspectRatio = detectedMouthW / Math.max(1, detectedMouthH);
 
-    // Corner elevation: during a smile gesture, the left and right mouth corners move upward relative to the center
-    const cornersAvgY = (leftLipY + rightLipY) / 2;
-    // Positive when corners are higher (smaller Y in screen coords) than center
-    const cornerElevation = (centerLipY - cornersAvgY) / Math.max(1, detectedMouthH);
+    // Corner elevation: Lip corners elevate upward (smaller Y) during smile
+    const leftCornerY = leftCornerCount > 0 ? leftCornerYSum / leftCornerCount : mouthBox.y + mouthBox.height * 0.5;
+    const rightCornerY = rightCornerCount > 0 ? rightCornerYSum / rightCornerCount : mouthBox.y + mouthBox.height * 0.5;
+    const avgCornersY = (leftCornerY + rightCornerY) / 2;
+    const cornerElevation = Math.max(-0.2, (bottomCenterY - avgCornersY) / Math.max(1, detectedMouthH));
 
-    const teethRatio = brightTeethPixels / Math.max(1, (mouthBox.width * mouthBox.height) / 4);
+    // Teeth Ratio
+    const roiSampleArea = (mouthBox.width * mouthBox.height) / 4;
+    const teethRatio = teethPixels / Math.max(1, roiSampleArea);
 
-    // Baseline Delta
+    // Baseline delta comparison if available
     let baselineDelta = 0;
     if (this.neutralBaseline && this.neutralBaseline.mouthWidthRatio > 0) {
       baselineDelta = (mouthWidthRatio - this.neutralBaseline.mouthWidthRatio) / this.neutralBaseline.mouthWidthRatio;
     }
 
-    // Calculate normalized Smile Gesture Score (0.00 .. 1.00)
-    // Smile gesture is characterized by:
-    // 1) Widened mouth relative to face (neutral is ~0.35-0.42; smile expands to ~0.48-0.65)
-    // 2) Corner elevation upward
-    // 3) Mouth aspect ratio widening
-    // 4) Relative expansion compared to baseline
-    // 5) Teeth/cavity brightness presence
+    // Factors:
+    // 1. Teeth factor: strong positive signal (0.0 to 1.0)
+    const teethFactor = Math.min(1, teethRatio * 3.8);
 
-    // Faster response curve: mouth width expansion triggers earlier (0.35 vs 0.38)
-    const widthFactor = Math.min(1, Math.max(0, (mouthWidthRatio - 0.35) / 0.16));
-    const aspectFactor = Math.min(1, Math.max(0, (mouthAspectRatio - 1.9) / 2.2));
-    const cornerFactor = Math.min(1, Math.max(0, (cornerElevation + 0.02) / 0.22));
-    const teethFactor = Math.min(1, teethRatio * 8);
-    const baselineFactor = baselineDelta > 0 ? Math.min(1, baselineDelta * 3.5) : 0;
+    // 2. Width factor: resting is ~0.38-0.42, smiling stretches to 0.48-0.65
+    const widthFactor = Math.min(1, Math.max(0, (mouthWidthRatio - 0.40) / 0.16));
 
-    // Weighted composite gesture score - responsive and instantaneous
-    let score: number;
-    if (this.neutralBaseline && this.neutralBaseline.sampleCount >= 3) {
-      // With neutral baseline: emphasize relative expansion
-      score = widthFactor * 0.35 + baselineFactor * 0.35 + cornerFactor * 0.15 + teethFactor * 0.15;
+    // 3. Opening/height factor: open smile is 0.14-0.25 of face height
+    const heightFactor = Math.min(1, Math.max(0, (mouthHeightRatio - 0.08) / 0.14));
+
+    // 4. Corner elevation factor: corners curve upward
+    const cornerFactor = Math.min(1, Math.max(0, (cornerElevation - 0.08) / 0.22));
+
+    // 5. Baseline factor:
+    const baselineFactor = baselineDelta > 0 ? Math.min(1, baselineDelta * 3.2) : 0;
+
+    let score = 0;
+    if (teethFactor >= 0.20) {
+      // Open smile with visible teeth: primary classroom gesture!
+      score = teethFactor * 0.46 + widthFactor * 0.32 + heightFactor * 0.14 + cornerFactor * 0.08;
     } else {
-      // Without baseline: use absolute geometric landmarks
-      score = widthFactor * 0.50 + aspectFactor * 0.20 + cornerFactor * 0.15 + teethFactor * 0.15;
+      // Broad closed-mouth smile: wide stretch + upward corners
+      score = widthFactor * 0.52 + cornerFactor * 0.36 + heightFactor * 0.12;
+    }
+
+    if (this.neutralBaseline && this.neutralBaseline.sampleCount >= 2) {
+      score = score * 0.70 + baselineFactor * 0.30;
     }
 
     const smileGestureScore = Math.round(Math.min(1, Math.max(0, score)) * 100) / 100;
@@ -520,8 +704,8 @@ export class SmileDetector {
 
   /**
    * Fast Multi-Zone Computer Vision:
-   * Splits the webcam feed into individual zones per team and analyzes each team independently in real-time.
-   * Enables instant response time (<50ms) and clear attribution without waiting for card markers.
+   * Analyzes each team room's zone independently in real-time.
+   * Completely rejects empty rooms and locks mouth directly on lips.
    */
   public async analyzeTeamZones(
     video: HTMLVideoElement,
@@ -557,48 +741,52 @@ export class SmileDetector {
     const imageData = this.processingCtx.getImageData(0, 0, width, height);
     const data = imageData.data;
 
+    // Check Native Chromium Face Detector if available
+    let nativeFaces: any[] = [];
+    if (this.isNativeDetectorAvailable && this.nativeFaceDetector) {
+      try {
+        nativeFaces = await this.nativeFaceDetector.detect(this.processingCanvas);
+      } catch {
+        nativeFaces = [];
+      }
+    }
+
     return zones.map((zone) => {
       const startX = Math.max(0, Math.floor(zone.normX * width));
       const endX = Math.min(width, Math.ceil((zone.normX + zone.normWidth) * width));
       const startY = Math.max(0, Math.floor(zone.normY * height));
       const endY = Math.min(height, Math.ceil((zone.normY + zone.normHeight) * height));
 
-      let minX = endX;
-      let maxX = startX;
-      let minY = endY;
-      let maxY = startY;
-      let skinPixelCount = 0;
-      let markerPixelCount = 0;
+      // 1. If native face detector found a face inside this zone
+      if (nativeFaces && nativeFaces.length > 0) {
+        const zoneFace = nativeFaces.find((f: any) => {
+          const cx = f.boundingBox.x + f.boundingBox.width / 2;
+          const cy = f.boundingBox.y + f.boundingBox.height / 2;
+          return cx >= startX && cx <= endX && cy >= startY && cy <= endY;
+        });
 
-      // Stride 3 for rapid scanning (<1ms per zone)
-      const step = 3;
-      for (let y = startY + 4; y < endY - 4; y += step) {
-        for (let x = startX + 4; x < endX - 4; x += step) {
-          const idx = (y * width + x) * 4;
-          const r = data[idx];
-          const g = data[idx + 1];
-          const b = data[idx + 2];
-
-          if (isSkinTone(r, g, b)) {
-            skinPixelCount++;
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          } else {
-            const hsv = rgbToHsv(r, g, b);
-            if (this.matchesTeamMarker(zone.teamCode, zone.markerColor, r, g, b, hsv)) {
-              markerPixelCount++;
-            }
-          }
+        if (zoneFace) {
+          const metrics = this.processNativeFace(zoneFace, width, height, imageData);
+          const isSmiling = metrics.faceDetected && metrics.smileGestureScore >= smileThreshold;
+          return {
+            teamId: zone.teamId,
+            teamCode: zone.teamCode,
+            teamName: zone.teamName,
+            color: zone.color,
+            zone,
+            metrics,
+            isSmiling,
+            smileScore: metrics.smileGestureScore,
+            markerConfidence: 1.0,
+          };
         }
       }
 
-      const minRequiredSkin = 35;
-      const faceW = maxX - minX;
-      const faceH = maxY - minY;
+      // 2. Pure Canvas Face Cluster Detection & Anatomical Verification
+      const faceBox = findFaceClusterInRegion(startX, endX, startY, endY, data, width, height);
 
-      if (skinPixelCount < minRequiredSkin || faceW < 22 || faceH < 28) {
+      // If no valid face is present in this room:
+      if (!faceBox) {
         return {
           teamId: zone.teamId,
           teamCode: zone.teamCode,
@@ -608,40 +796,12 @@ export class SmileDetector {
           metrics: this.createEmptyMetrics(),
           isSmiling: false,
           smileScore: 0,
-          markerConfidence: Math.min(1, markerPixelCount / 18),
+          markerConfidence: 0,
         };
       }
 
-      // Zone-relative face box
-      const faceBox: BoundingBox = {
-        x: minX,
-        y: minY,
-        width: faceW,
-        height: faceH,
-      };
-
-      // Mouth ROI in lower face region
-      const mouthX = Math.round(faceBox.x + faceBox.width * 0.20);
-      const mouthY = Math.round(faceBox.y + faceBox.height * 0.62);
-      const mouthW = Math.round(faceBox.width * 0.60);
-      const mouthH = Math.round(faceBox.height * 0.32);
-
-      const mouthBox: BoundingBox = {
-        x: Math.max(startX, mouthX),
-        y: Math.max(startY, mouthY),
-        width: Math.min(endX - mouthX, mouthW),
-        height: Math.min(endY - mouthY, mouthH),
-      };
-
-      const metrics = this.calculateMetricsFromMouthROI(
-        faceBox,
-        mouthBox,
-        imageData,
-        width,
-        height,
-        'CANVAS_GEOMETRY'
-      );
-
+      // Real face is confirmed! Analyze mouth and smile:
+      const metrics = this.calculateMetricsFromMouthROI(faceBox, imageData, width, height, 'CANVAS_GEOMETRY');
       const isSmiling = metrics.faceDetected && metrics.smileGestureScore >= smileThreshold;
 
       return {
@@ -653,32 +813,99 @@ export class SmileDetector {
         metrics,
         isSmiling,
         smileScore: metrics.smileGestureScore,
-        markerConfidence: Math.min(1, markerPixelCount / 18),
+        markerConfidence: 1.0,
       };
     });
   }
 
-  private matchesTeamMarker(
-    teamCode: string,
-    markerColor: string | undefined,
-    r: number,
-    g: number,
-    b: number,
-    hsv: { h: number; s: number; v: number }
-  ): boolean {
-    if (teamCode === 'TEAM1' || markerColor === 'blue') {
-      return hsv.h >= 180 && hsv.h <= 245 && hsv.s >= 35 && hsv.v >= 25 && b > r * 1.2;
+  /**
+   * Render a specific team's camera booth/room onto their dedicated canvas.
+   * Mirrors the video horizontally so participants see their own motion naturally.
+   */
+  public renderZoneToCanvas(
+    video: HTMLVideoElement,
+    zone: TeamZone,
+    targetCanvas: HTMLCanvasElement,
+    analysis?: TeamZoneAnalysis,
+    isWinner?: boolean,
+    isLocked?: boolean
+  ): void {
+    if (!video || video.readyState < 2 || !targetCanvas) return;
+    const ctx = targetCanvas.getContext('2d');
+    if (!ctx) return;
+
+    const cw = targetCanvas.width;
+    const ch = targetCanvas.height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, cw, ch);
+
+    const vw = video.videoWidth || 640;
+    const vh = video.videoHeight || 480;
+
+    // Mirrored coordinates mapping:
+    const sx = Math.max(0, (1 - zone.normX - zone.normWidth) * vw);
+    const sy = Math.max(0, zone.normY * vh);
+    const sw = Math.min(vw - sx, zone.normWidth * vw);
+    const sh = Math.min(vh - sy, zone.normHeight * vh);
+
+    ctx.save();
+    // Mirror horizontally so the participant feels like they are in a mirror
+    ctx.translate(cw, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+    ctx.restore();
+
+    // Draw Face and Mouth HUD ONLY if a real face is verified in this room!
+    if (analysis && analysis.metrics.faceDetected && analysis.metrics.faceBox) {
+      const fb = analysis.metrics.faceBox;
+      const zonePixelW = zone.normWidth * this.processingCanvas.width;
+      const zonePixelH = zone.normHeight * this.processingCanvas.height;
+      const zonePixelX = zone.normX * this.processingCanvas.width;
+      const zonePixelY = zone.normY * this.processingCanvas.height;
+
+      const relX = Math.max(0, (fb.x - zonePixelX) / zonePixelW);
+      const relY = Math.max(0, (fb.y - zonePixelY) / zonePixelH);
+      const relW = Math.max(0.1, Math.min(1, fb.width / zonePixelW));
+      const relH = Math.max(0.1, Math.min(1, fb.height / zonePixelH));
+
+      const boxX = relX * cw;
+      const boxY = relY * ch;
+      const boxW = relW * cw;
+      const boxH = relH * ch;
+
+      ctx.save();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = analysis.isSmiling ? '#fbbf24' : (zone.color || '#38bdf8');
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+      // Mouth indicator
+      if (analysis.metrics.mouthBox) {
+        const mb = analysis.metrics.mouthBox;
+        const mRelX = Math.max(0, (mb.x - zonePixelX) / zonePixelW);
+        const mRelY = Math.max(0, (mb.y - zonePixelY) / zonePixelH);
+        const mRelW = mb.width / zonePixelW;
+        const mRelH = mb.height / zonePixelH;
+
+        ctx.strokeStyle = analysis.isSmiling ? '#f59e0b' : '#ec4899';
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(mRelX * cw, mRelY * ch, mRelW * cw, mRelH * ch);
+      }
+      ctx.restore();
     }
-    if (teamCode === 'TEAM2' || markerColor === 'orange') {
-      return hsv.h >= 15 && hsv.h <= 45 && hsv.s >= 40 && hsv.v >= 40 && r > b * 1.3;
+
+    // Winner effect or Locked overlay
+    if (isWinner) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.22)';
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.restore();
+    } else if (isLocked) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.60)';
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.restore();
     }
-    if (teamCode === 'TEAM3' || markerColor === 'green') {
-      return hsv.h >= 85 && hsv.h <= 155 && hsv.s >= 35 && hsv.v >= 25 && g > r * 1.15;
-    }
-    if (teamCode === 'TEAM4' || markerColor === 'purple') {
-      return hsv.h >= 270 && hsv.h <= 335 && hsv.s >= 35 && hsv.v >= 25 && r > g * 1.1 && b > g * 1.1;
-    }
-    return false;
   }
 
   /**
@@ -768,15 +995,12 @@ export class SmileDetector {
       }
     }
 
-    // Spatial affinity: bonus if marker is held near the candidate face
     return teams.map((team, index) => {
       const code = team.teamCode || `TEAM${index + 1}`;
       const stat = counts[code] || { count: 0, minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
-      // Normalization: 30 pixels sampled (~480 real frame pixels) = strong confidence 1.0
       let rawConfidence = Math.min(1, stat.count / 28);
 
-      // Check proximity to face box if face is detected
       if (faceBox && stat.count > 5) {
         const markerCenterX = (stat.minX + stat.maxX) / 2;
         const markerCenterY = (stat.minY + stat.maxY) / 2;

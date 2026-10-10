@@ -34,11 +34,23 @@ export const CamRaceGame: React.FC<CamRaceGameProps> = ({ onBackToEduplay }) => 
   const cloudSessionIdRef = React.useRef<string | null>(null);
   const [settings, setSettings] = useState<GameSettings>(() => GameRepository.loadSettings());
   const [questions, setQuestions] = useState<Question[]>(() => GameRepository.loadQuestions());
-  const [savedSession, setSavedSession] = useState<GameSession | null>(() => GameRepository.loadSession());
+  const [savedSession, setSavedSession] = useState<GameSession | null>(() => {
+    const loaded = GameRepository.loadSession();
+    if (loaded && loaded.state !== 'HOME' && loaded.state !== 'FINAL_RESULT' && loaded.state !== 'CERTIFICATE') {
+      return loaded;
+    }
+    return null;
+  });
 
   const [session, setSession] = useState<GameSession>(() => {
     const loaded = GameRepository.loadSession();
-    if (loaded) return loaded;
+    if (loaded) {
+      // Khi bấm vào chơi ngay thì phải vào trang chủ của Cam Race chứ không vào chơi luôn
+      return {
+        ...loaded,
+        state: 'HOME',
+      };
+    }
 
     return {
       gameId: `game_${Date.now()}`,

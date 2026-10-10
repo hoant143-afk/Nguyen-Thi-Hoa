@@ -166,13 +166,12 @@ export const SmileCalibrationModal: React.FC<SmileCalibrationModalProps> = ({
           }
         }
 
-        // Test qualification
-        const maxMarkerConf = Math.max(0, ...markers.map((m) => m.confidence));
-        if (
+        // Test qualification: smile gesture detection meets threshold
+        const isSmileQualified =
           metrics.faceDetected &&
-          metrics.smileGestureScore >= localSettings.smileThreshold &&
-          maxMarkerConf >= localSettings.markerThreshold
-        ) {
+          metrics.smileGestureScore >= localSettings.smileThreshold;
+
+        if (isSmileQualified) {
           stableCounter++;
           if (stableCounter >= localSettings.requiredStableFrames) {
             if (!isTestQualified) {

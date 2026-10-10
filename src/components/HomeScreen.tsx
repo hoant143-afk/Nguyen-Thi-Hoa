@@ -132,7 +132,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     });
   };
 
-  const hasResumeOption = savedSession && savedSession.state !== 'FINAL_RESULT' && savedSession.state !== 'CERTIFICATE';
+  const hasResumeOption = Boolean(
+    savedSession &&
+    savedSession.state !== 'HOME' &&
+    savedSession.state !== 'FINAL_RESULT' &&
+    savedSession.state !== 'CERTIFICATE'
+  );
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 py-4 flex flex-col items-center justify-center min-h-[calc(100vh-80px)]">
