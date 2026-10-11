@@ -293,7 +293,7 @@ export class QuestionsRepository {
     });
 
     // Cloud Mode Implementation (Requirement E & F)
-    if (apiClient.getMode() === 'cloud') {
+    if (apiClient.getMode() === 'cloud' && apiClient.getApiUrl()) {
       try {
         const cloudRows = formattedQuestions.map((q, idx) => ({
           order: idx + 1,
@@ -321,30 +321,29 @@ export class QuestionsRepository {
           fileType: options?.fileType || 'XLSX',
         });
 
-        if (!res.success || !res.data) {
-          throw new Error(res.error || res.message || 'Lỗi lưu câu hỏi trên Apps Script Google Sheets.');
+        if (res.success && res.data) {
+          const cloudResult: ImportBatchResult = {
+            total: Number(res.data.total) || formattedQuestions.length,
+            created: Number(res.data.created) || 0,
+            updated: Number(res.data.updated) || 0,
+            skipped: Number(res.data.skipped) || 0,
+            failed: Number(res.data.failed) || 0,
+            errors: Array.isArray(res.data.errors) ? res.data.errors : [],
+          };
+
+          // Cache locally as well
+          this.applyLocalImport(bankId, formattedQuestions, mode);
+
+          if (options?.importId) {
+            markImportProcessed(options.importId, cloudResult);
+          }
+
+          return cloudResult;
+        } else {
+          console.warn('Cloud questions.importBatch unsuccessful, falling back to local persistence:', res.error);
         }
-
-        const cloudResult: ImportBatchResult = {
-          total: Number(res.data.total) || formattedQuestions.length,
-          created: Number(res.data.created) || 0,
-          updated: Number(res.data.updated) || 0,
-          skipped: Number(res.data.skipped) || 0,
-          failed: Number(res.data.failed) || 0,
-          errors: Array.isArray(res.data.errors) ? res.data.errors : [],
-        };
-
-        // Cache locally as well
-        this.applyLocalImport(bankId, formattedQuestions, mode);
-
-        if (options?.importId) {
-          markImportProcessed(options.importId, cloudResult);
-        }
-
-        return cloudResult;
       } catch (err: any) {
-        console.error('Cloud questions.importBatch failed:', err);
-        throw err;
+        console.warn('Cloud questions.importBatch failed, falling back to local persistence:', err);
       }
     }
 

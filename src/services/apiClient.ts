@@ -46,7 +46,9 @@ export interface PendingScoreEvent {
 
 const PENDING_QUEUE_KEY = 'eduplay_pending_events_queue_v1';
 const DATA_MODE_OVERRIDE_KEY = 'eduplay_user_data_mode_override';
-const DEFAULT_TIMEOUT_MS = 14000;
+const CUSTOM_URL_KEY = 'eduplay_custom_apps_script_url';
+const PROXY_API_URL = '/api/apps-script';
+const DEFAULT_TIMEOUT_MS = 15000;
 
 // Set of public actions that never require authentication
 const PUBLIC_ACTIONS = new Set<string>([
@@ -59,7 +61,8 @@ const PUBLIC_ACTIONS = new Set<string>([
 ]);
 
 class EduplayApiClient {
-  private apiUrl: string;
+  private apiUrl: string = PROXY_API_URL;
+  private customAppsScriptUrl: string = '';
   private currentMode: DataMode;
   private isOnline: boolean = typeof navigator !== 'undefined' ? navigator.onLine : true;
   private isCloudReachable: boolean = true;
@@ -68,27 +71,30 @@ class EduplayApiClient {
   private listeners: Array<(status: SyncStatus) => void> = [];
 
   constructor() {
-    // 1. Resolve API URL from Vite environment variable
-    const envUrl = (import.meta as any).env?.VITE_APPS_SCRIPT_API_URL || '';
-    this.apiUrl = typeof envUrl === 'string' ? envUrl.trim() : '';
+    // 1. API requests are always routed via the serverless proxy /api/apps-script
+    this.apiUrl = PROXY_API_URL;
 
-    // 2. Resolve initial Data Mode
-    const savedMode = typeof localStorage !== 'undefined' ? localStorage.getItem(DATA_MODE_OVERRIDE_KEY) as DataMode : null;
+    // 2. Load custom override URL if set by user in UI
+    if (typeof localStorage !== 'undefined') {
+      const savedCustom = localStorage.getItem(CUSTOM_URL_KEY);
+      if (savedCustom) {
+        this.customAppsScriptUrl = savedCustom.trim();
+      }
+    }
+
+    // 3. Resolve initial Data Mode (default to 'cloud' for seamless Google Sheets integration)
+    const savedMode = typeof localStorage !== 'undefined' ? (localStorage.getItem(DATA_MODE_OVERRIDE_KEY) as DataMode) : null;
     const envMode = (import.meta as any).env?.VITE_DATA_MODE as DataMode;
 
     if (savedMode === 'cloud' || savedMode === 'local') {
       this.currentMode = savedMode;
-    } else if (envMode === 'cloud') {
-      this.currentMode = 'cloud';
     } else if (envMode === 'local') {
       this.currentMode = 'local';
-    } else if (this.apiUrl) {
-      this.currentMode = 'cloud';
     } else {
-      this.currentMode = 'local'; // Default to local if no Google Apps Script API URL
+      this.currentMode = 'cloud'; // Default to cloud so all cloud features work seamlessly via proxy
     }
 
-    // 3. Listen to browser online/offline events
+    // 4. Listen to browser online/offline events
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
         this.isOnline = true;
@@ -127,7 +133,7 @@ class EduplayApiClient {
     return {
       mode: this.currentMode,
       isOnline: this.isOnline,
-      isCloudConfigured: !!this.apiUrl,
+      isCloudConfigured: true,
       isCloudReachable: this.isCloudReachable && this.isOnline,
       pendingEventsCount: this.getPendingEvents().length,
       lastSyncTime: this.lastSyncTime,
@@ -150,12 +156,20 @@ class EduplayApiClient {
   }
 
   public setApiUrl(url: string): void {
-    this.apiUrl = url.trim();
+    const clean = url.trim();
+    this.customAppsScriptUrl = clean;
+    if (typeof localStorage !== 'undefined') {
+      if (clean) {
+        localStorage.setItem(CUSTOM_URL_KEY, clean);
+      } else {
+        localStorage.removeItem(CUSTOM_URL_KEY);
+      }
+    }
     this.notifyStatusChange();
   }
 
   public getApiUrl(): string {
-    return this.apiUrl;
+    return this.customAppsScriptUrl || this.apiUrl;
   }
 
   public isActionPublic(action: string): boolean {
@@ -177,20 +191,19 @@ class EduplayApiClient {
 
   /**
    * Central Core API Request
-   * Transports action, optional idToken, and sanitized data using Content-Type text/plain
-   * to avoid Google Apps Script CORS preflight issues.
+   * Routes via Serverless Proxy /api/apps-script to completely bypass CORS.
    */
   public async apiRequest<T = any>(
     action: string,
     data: any = {},
     options: ApiRequestOptions = {}
   ): Promise<ApiResponse<T>> {
-    // If not in cloud mode or no API URL configured, return graceful local hint
-    if (this.currentMode !== 'cloud' || !this.apiUrl) {
+    // Only return LOCAL_MODE if the user explicitly chose local mode
+    if (this.currentMode === 'local') {
       return {
         success: false,
         error: 'LOCAL_MODE',
-        message: 'Ứng dụng đang chạy ở chế độ Cục bộ (Local Mode).',
+        message: 'Ứng dụng đang chạy ở chế độ Cục bộ (Local Mode). Vui lòng chuyển sang chế độ Cloud để đồng bộ.',
       };
     }
 
@@ -203,7 +216,7 @@ class EduplayApiClient {
       };
     }
 
-    // Sanitize client payload: Rule 11 mandates NEVER allowing client to dictate ownerUid
+    // Sanitize client payload
     const sanitizedData = { ...(data || {}) };
     if ('ownerUid' in sanitizedData) {
       delete sanitizedData.ownerUid;
@@ -243,11 +256,16 @@ class EduplayApiClient {
           requestBody.idToken = idToken;
         }
 
-        const response = await fetch(this.apiUrl, {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (this.customAppsScriptUrl) {
+          headers['x-apps-script-url'] = this.customAppsScriptUrl;
+        }
+
+        const response = await fetch(PROXY_API_URL, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'text/plain;charset=utf-8',
-          },
+          headers,
           body: JSON.stringify(requestBody),
           signal: controller.signal,
         });
@@ -255,7 +273,12 @@ class EduplayApiClient {
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-          throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+          const errText = await response.text().catch(() => '');
+          let errJson: any;
+          try {
+            errJson = JSON.parse(errText);
+          } catch {}
+          throw new Error(errJson?.message || errJson?.error || `HTTP Error ${response.status}: ${response.statusText}`);
         }
 
         const json: ApiResponse<T> = await response.json();
@@ -267,7 +290,6 @@ class EduplayApiClient {
           !tokenRefreshed &&
           auth.currentUser
         ) {
-          // Token refresh flow (Rule 44)
           tokenRefreshed = true;
           const freshToken = await this.getIdToken(true);
           if (freshToken) {

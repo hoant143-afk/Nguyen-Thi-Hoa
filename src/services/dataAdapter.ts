@@ -242,6 +242,37 @@ export class EduplayDataAdapter {
     return true;
   }
 
+  public async deleteQuestionBank(bankId: string): Promise<boolean> {
+    // 1. Remove from local legacy repository
+    QuestionBankRepository.deleteLesson(bankId);
+
+    // 2. Remove from local question banks cache
+    try {
+      const STORAGE_KEY_QUESTION_BANKS = 'eduplay_custom_question_banks_v2';
+      const raw = localStorage.getItem(STORAGE_KEY_QUESTION_BANKS);
+      if (raw) {
+        const banks = JSON.parse(raw);
+        if (Array.isArray(banks)) {
+          const filtered = banks.filter((b: any) => b.id !== bankId);
+          localStorage.setItem(STORAGE_KEY_QUESTION_BANKS, JSON.stringify(filtered));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to delete bank from local cache', e);
+    }
+
+    // 3. If in cloud mode, call cloud API to disable/delete
+    if (this.getMode() === 'cloud') {
+      try {
+        await QuestionBanksRepository.disable(bankId);
+      } catch (err) {
+        console.warn('Cloud delete bank warning:', err);
+      }
+    }
+
+    return true;
+  }
+
   public async duplicateBank(bankId: string): Promise<QuestionBankLesson | null> {
     const lesson = QuestionBankRepository.getLessonById(bankId);
     if (!lesson) return null;

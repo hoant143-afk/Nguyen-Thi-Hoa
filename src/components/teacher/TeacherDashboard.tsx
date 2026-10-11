@@ -110,6 +110,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEdup
     await loadData();
   };
 
+  const handleDeleteBank = async (bankId: string) => {
+    await dataAdapter.deleteQuestionBank(bankId);
+    await loadData();
+  };
+
   const handleIssueCertificate = async (cert: CertificateRecord) => {
     await dataAdapter.issueCertificate(cert);
     await loadData();
@@ -252,6 +257,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onBackToEdup
             onRefreshBanks={loadData}
             onOpenImportModal={handleOpenImportModal}
             onSaveBank={handleSaveBank}
+            onDeleteBank={handleDeleteBank}
           />
         )}
 

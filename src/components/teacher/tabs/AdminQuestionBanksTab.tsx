@@ -44,6 +44,7 @@ export const AdminQuestionBanksTab: React.FC<AdminQuestionBanksTabProps> = ({
   onRefreshBanks,
   onOpenImportModal,
   onSaveBank,
+  onDeleteBank,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedGrade, setSelectedGrade] = useState<string>('ALL');
@@ -572,9 +573,26 @@ export const AdminQuestionBanksTab: React.FC<AdminQuestionBanksTabProps> = ({
                     title="Xuất file XLSX chuẩn"
                   >
                     <Download className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>XUẤT FILE</span>
+                    <span>XUẤT</span>
                   </button>
                 </div>
+
+                {/* Xóa bộ câu hỏi */}
+                {onDeleteBank && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundService.playClick();
+                      if (window.confirm(`Bạn có chắc chắn muốn xóa bộ câu hỏi "${bank.lessonTitle}"? Dữ liệu sẽ bị gỡ bỏ khỏi hệ thống.`)) {
+                        onDeleteBank(bank.id);
+                      }
+                    }}
+                    className="w-full py-1.5 bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 hover:text-rose-200 rounded-xl text-[11px] font-semibold border border-rose-800/40 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3 text-rose-400" />
+                    <span>XÓA BỘ CÂU HỎI</span>
+                  </button>
+                )}
               </div>
             </div>
           );

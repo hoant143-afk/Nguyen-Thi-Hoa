@@ -169,7 +169,7 @@ export class QuestionBanksRepository {
     const topic = (data.topic || '').trim();
     const description = (data.description || '').trim();
 
-    if (apiClient.getMode() === 'cloud') {
+    if (apiClient.getMode() === 'cloud' && apiClient.getApiUrl()) {
       try {
         const res = await apiClient.apiRequest<any>('questionBanks.create', {
           name: rawName,
@@ -180,31 +180,30 @@ export class QuestionBanksRepository {
           description,
         });
 
-        if (!res.success || !res.data) {
-          throw new Error(res.error || res.message || 'Không thể tạo ngân hàng câu hỏi trên Cloud.');
+        if (res.success && res.data) {
+          const createdBank: QuestionBank = {
+            id: String(res.data.id),
+            bankCode: res.data.bankCode || `BANK_${res.data.id}`,
+            name: res.data.name || rawName,
+            lessonTitle: res.data.name || rawName,
+            subject: res.data.subject || subject,
+            grade: Number(res.data.grade) || grade,
+            topic: res.data.topic || topic,
+            description: res.data.description || description,
+            questionCount: Number(res.data.questionCount) || 0,
+            enabled: true,
+            createdAt: res.data.createdAt || Date.now(),
+            updatedAt: res.data.updatedAt || Date.now(),
+          };
+
+          // Cache in local repository
+          this.saveLocalBank(createdBank);
+          return createdBank;
+        } else {
+          console.warn('Cloud create returned unsuccessful, falling back to local:', res.error);
         }
-
-        const createdBank: QuestionBank = {
-          id: String(res.data.id),
-          bankCode: res.data.bankCode || `BANK_${res.data.id}`,
-          name: res.data.name || rawName,
-          lessonTitle: res.data.name || rawName,
-          subject: res.data.subject || subject,
-          grade: Number(res.data.grade) || grade,
-          topic: res.data.topic || topic,
-          description: res.data.description || description,
-          questionCount: Number(res.data.questionCount) || 0,
-          enabled: true,
-          createdAt: res.data.createdAt || Date.now(),
-          updatedAt: res.data.updatedAt || Date.now(),
-        };
-
-        // Cache in local repository
-        this.saveLocalBank(createdBank);
-        return createdBank;
       } catch (err: any) {
-        console.error('Cloud createQuestionBank error:', err);
-        throw err;
+        console.warn('Cloud createQuestionBank error, falling back to local:', err);
       }
     }
 
