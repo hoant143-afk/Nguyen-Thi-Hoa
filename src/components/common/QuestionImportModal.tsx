@@ -166,14 +166,14 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
         type: isCsv ? 'CSV' : isXlsx ? 'Excel (.xlsx)' : 'Excel (.xls)',
       });
 
-      // Auto-detect bank name, grade, subject from file name if empty
+      // Auto-detect bank name, grade, subject from file name
       const cleanBaseName = selectedFile.name
         .replace(/\.[^/.]+$/, '')
         .replace(/[-_]+/g, ' ')
         .trim();
 
-      if (!bankName) {
-        setBankName(cleanBaseName);
+      if (!bankName || bankName.trim() === '') {
+        setBankName(cleanBaseName || 'Bộ câu hỏi mới');
       }
 
       const gradeMatch = cleanBaseName.match(/(?:khoi|khối|lop|lớp|k)\s*([1-9])/i);

@@ -114,18 +114,69 @@ export function parseCsv(text: string, customDelimiter?: string): ParsedCsvResul
     return { headers: [], rows: [], detectedDelimiter: delimiter };
   }
 
-  const rawHeaders = rawRows[0].map((h) => h.replace(/^["']|["']$/g, '').trim());
+  // 1. Scan for the best header row within the first 10 rows
+  const normalize = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').replace(/[^a-z0-9]/g, '');
+
+  const KEYWORDS = ['cauhoi', 'cau', 'noidung', 'question', 'dapan', 'phuongan', 'option', 'stt', 'order', 'a', 'b', 'c', 'd', 'giaithich', 'diem'];
+
+  let bestHeaderRowIndex = 0;
+  let maxScore = -1;
+  const maxScanRows = Math.min(rawRows.length, 10);
+
+  for (let r = 0; r < maxScanRows; r++) {
+    const row = rawRows[r];
+    let matchCount = 0;
+    let nonBlank = 0;
+    for (const cell of row) {
+      const clean = cell.replace(/^["']|["']$/g, '').trim();
+      if (clean) {
+        nonBlank++;
+        const norm = normalize(clean);
+        if (norm === 'a' || norm === 'b' || norm === 'c' || norm === 'd' ||
+            KEYWORDS.some((kw) => norm === kw || norm.startsWith(kw) || norm.includes(kw))) {
+          matchCount++;
+        }
+      }
+    }
+    if (nonBlank >= 2) {
+      const score = matchCount * 2 + nonBlank;
+      if (score > maxScore) {
+        maxScore = score;
+        bestHeaderRowIndex = r;
+      }
+    }
+  }
+
+  const rawHeaderRow = rawRows[bestHeaderRowIndex] || [];
+  const alignedHeaders: { name: string; colIndex: number }[] = [];
+  const seenHeaders = new Map<string, number>();
+
+  for (let c = 0; c < rawHeaderRow.length; c++) {
+    let header = rawHeaderRow[c].replace(/^["']|["']$/g, '').trim();
+    if (!header) continue;
+
+    const lower = header.toLowerCase();
+    const count = seenHeaders.get(lower) || 0;
+    seenHeaders.set(lower, count + 1);
+    if (count > 0) {
+      header = `${header}_${count + 1}`;
+    }
+
+    alignedHeaders.push({ name: header, colIndex: c });
+  }
+
+  const rawHeaders = alignedHeaders.map((h) => h.name);
   const rows: Record<string, string>[] = [];
 
-  for (let r = 1; r < rawRows.length; r++) {
+  for (let r = bestHeaderRowIndex + 1; r < rawRows.length; r++) {
     const rowCells = rawRows[r];
     const obj: Record<string, string> = {};
     let hasAnyData = false;
 
-    for (let c = 0; c < rawHeaders.length; c++) {
-      const header = rawHeaders[c] || `Cột_${c + 1}`;
-      const val = rowCells[c] !== undefined ? rowCells[c].replace(/^["']|["']$/g, '').trim() : '';
-      obj[header] = val;
+    for (const { name, colIndex } of alignedHeaders) {
+      const val = rowCells[colIndex] !== undefined ? rowCells[colIndex].replace(/^["']|["']$/g, '').trim() : '';
+      obj[name] = val;
       if (val !== '') hasAnyData = true;
     }
 

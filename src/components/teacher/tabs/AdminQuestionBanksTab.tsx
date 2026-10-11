@@ -29,6 +29,7 @@ import {
   generateQuestionExcelTemplate,
 } from '../../../services/importer/questionImporter';
 import { QuestionBankExporter } from '../../../services/questionBankExporter';
+import { dataAdapter } from '../../../services/dataAdapter';
 
 interface AdminQuestionBanksTabProps {
   banks: QuestionBankLesson[];
@@ -439,7 +440,7 @@ export const AdminQuestionBanksTab: React.FC<AdminQuestionBanksTabProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredBanks.map((bank) => {
           const isEnabled = bank.enabled !== false;
-          const questionsCount = bank.questions?.length || 0;
+          const questionsCount = bank.questions?.length || (bank as any).questionCount || 0;
           const updatedDate = bank.updatedAt
             ? new Date(bank.updatedAt).toLocaleDateString('vi-VN')
             : 'Mặc định';
@@ -500,8 +501,17 @@ export const AdminQuestionBanksTab: React.FC<AdminQuestionBanksTabProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       soundService.playClick();
+                      if (!bank.questions || bank.questions.length === 0) {
+                        try {
+                          const qs = await dataAdapter.getQuestionsByBank(bank.id);
+                          setViewingBank({ ...bank, questions: qs });
+                          return;
+                        } catch (e) {
+                          console.warn('Error loading bank questions:', e);
+                        }
+                      }
                       setViewingBank(bank);
                     }}
                     className="w-full py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-xl text-xs font-bold border border-purple-500/40 flex items-center justify-center gap-1.5 transition-all cursor-pointer"

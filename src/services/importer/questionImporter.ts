@@ -27,37 +27,128 @@ export function normalizeHeaderKey(str: string): string {
  */
 export function autoDetectColumnMapping(headers: string[]): ColumnMapping {
   const mapping: ColumnMapping = {};
+  const assignedHeaders = new Set<string>();
 
-  const matchers: Record<keyof ColumnMapping, string[]> = {
-    order: ['stt', 'order', 'no', 'thutu', 'id', 'sothutu', 'cauthu'],
-    subject: ['subject', 'mon', 'monhoc', 'chuongtrinh'],
-    grade: ['grade', 'lop', 'khoi', 'khoilop'],
-    topic: ['topic', 'chude', 'bai', 'chuyende', 'phan', 'baihoc'],
-    questionType: ['questiontype', 'loai', 'loaicauhoi', 'type', 'kieu'],
-    question: ['question', 'cauhoi', 'noidung', 'cau', 'noidungcauhoi', 'cauhoitracnghiem'],
-    optionA: ['optiona', 'dapana', 'phuongana', 'a', 'caua', 'luachona'],
-    optionB: ['optionb', 'dapanb', 'phuonganb', 'b', 'caub', 'luachonb'],
-    optionC: ['optionc', 'dapanc', 'phuonganc', 'c', 'cauc', 'luachonc'],
-    optionD: ['optiond', 'dapand', 'phuongand', 'd', 'caud', 'luachond'],
-    correctAnswer: ['correctanswer', 'dapandung', 'dapan', 'correct', 'answer', 'key', 'ketqua'],
-    explanation: ['explanation', 'giaithich', 'huongdan', 'huongdangiai', 'note', 'ghichu', 'loigiai'],
-    difficulty: ['difficulty', 'dokho', 'mucdo', 'level'],
-    normalPoints: ['normalpoints', 'diem', 'points', 'diemchinh', 'point', 'diemso'],
-    stealPoints: ['stealpoints', 'diemcuop', 'steal', 'cuop'],
-    specialPoints: ['specialpoints', 'diemdacbiet', 'special', 'pointsx2'],
-    isSpecial: ['isspecial', 'dacbiet', 'caudacbiet', 'specialquestion'],
-    enabled: ['enabled', 'kichhoat', 'hieuluc', 'sudung', 'active'],
-    tags: ['tags', 'the', 'tag', 'nhan', 'tukhoa'],
-  };
+  // Pass 1: Unambiguous Exact / Specific Matches
+  // Crucial: Correct answer must take precedence over Option D (to avoid 'dapandung' matching 'd')
+  const exactMatchers: [keyof ColumnMapping, string[]][] = [
+    ['correctAnswer', [
+      'dapandung', 'cautraloidung', 'correctanswer', 'dapan', 'key', 'answer',
+      'ketqua', 'dung', 'dapanchinhxac', 'dapanchuan', 'cautraloi'
+    ]],
+    ['question', [
+      'cauhoi', 'noidung', 'noidungcauhoi', 'cauhoitracnghiem', 'question', 'debai', 'cau'
+    ]],
+    ['optionA', [
+      'dapana', 'phuongana', 'luachona', 'optiona', 'caua', 'dapan1', 'phuongan1', 'luachon1', 'option1', 'a', '1'
+    ]],
+    ['optionB', [
+      'dapanb', 'phuonganb', 'luachonb', 'optionb', 'caub', 'dapan2', 'phuongan2', 'luachon2', 'option2', 'b', '2'
+    ]],
+    ['optionC', [
+      'dapanc', 'phuonganc', 'luachonc', 'optionc', 'cauc', 'dapan3', 'phuongan3', 'luachon3', 'option3', 'c', '3'
+    ]],
+    ['optionD', [
+      'dapand', 'phuongand', 'luachond', 'optiond', 'caud', 'dapan4', 'phuongan4', 'luachon4', 'option4', 'd', '4'
+    ]],
+    ['order', [
+      'stt', 'order', 'no', 'thutu', 'sothutu', 'cauthu', 'id'
+    ]],
+    ['explanation', [
+      'giaithich', 'huongdan', 'huongdangiai', 'loigiai', 'explanation', 'ghichu', 'note'
+    ]],
+    ['difficulty', [
+      'difficulty', 'dokho', 'mucdo', 'level', 'capdo'
+    ]],
+    ['normalPoints', [
+      'normalpoints', 'diem', 'points', 'diemchinh', 'point', 'diemso', 'sodiem'
+    ]],
+    ['stealPoints', [
+      'stealpoints', 'diemcuop', 'steal', 'cuop'
+    ]],
+    ['specialPoints', [
+      'specialpoints', 'diemdacbiet', 'special', 'pointsx2'
+    ]],
+    ['isSpecial', [
+      'isspecial', 'dacbiet', 'caudacbiet', 'specialquestion'
+    ]],
+    ['topic', [
+      'topic', 'chude', 'bai', 'chuyende', 'phan', 'baihoc'
+    ]],
+    ['subject', [
+      'subject', 'mon', 'monhoc', 'chuongtrinh'
+    ]],
+    ['grade', [
+      'grade', 'lop', 'khoi', 'khoilop'
+    ]],
+    ['enabled', [
+      'enabled', 'kichhoat', 'hieuluc', 'sudung', 'active'
+    ]],
+    ['tags', [
+      'tags', 'the', 'tag', 'nhan', 'tukhoa'
+    ]],
+  ];
 
+  // Run exact match pass
   for (const rawHeader of headers) {
     const norm = normalizeHeaderKey(rawHeader);
-    for (const [field, keywords] of Object.entries(matchers) as [keyof ColumnMapping, string[]][]) {
-      if (!mapping[field]) {
-        if (keywords.some((k) => norm === k || norm.startsWith(k) || norm.includes(k))) {
+    if (!norm) continue;
+
+    for (const [field, keywords] of exactMatchers) {
+      if (!mapping[field] && !assignedHeaders.has(rawHeader)) {
+        if (keywords.includes(norm)) {
           mapping[field] = rawHeader;
+          assignedHeaders.add(rawHeader);
           break;
         }
+      }
+    }
+  }
+
+  // Pass 2: Prefix / contains matching for remaining fields
+  // Never match single-letter keywords here to prevent false positives
+  const prefixMatchers: [keyof ColumnMapping, string[]][] = [
+    ['correctAnswer', ['dapandung', 'correct', 'dapan', 'answer', 'cautraloidung']],
+    ['question', ['cauhoi', 'noidung', 'question', 'debai']],
+    ['optionA', ['phuongana', 'dapana', 'luachona', 'optiona', 'phuongan1', 'dapan1']],
+    ['optionB', ['phuonganb', 'dapanb', 'luachonb', 'optionb', 'phuongan2', 'dapan2']],
+    ['optionC', ['phuonganc', 'dapanc', 'luachonc', 'optionc', 'phuongan3', 'dapan3']],
+    ['optionD', ['phuongand', 'dapand', 'luachond', 'optiond', 'phuongan4', 'dapan4']],
+    ['explanation', ['giaithich', 'huongdan', 'loigiai', 'explain']],
+    ['topic', ['chude', 'topic', 'baihoc', 'chuyende']],
+    ['subject', ['monhoc', 'subject']],
+    ['grade', ['khoilop', 'grade']],
+    ['normalPoints', ['normalpoints', 'diemso', 'diemchinh', 'point']],
+  ];
+
+  for (const rawHeader of headers) {
+    if (assignedHeaders.has(rawHeader)) continue;
+    const norm = normalizeHeaderKey(rawHeader);
+    if (!norm) continue;
+
+    for (const [field, keywords] of prefixMatchers) {
+      if (!mapping[field]) {
+        if (keywords.some((kw) => norm === kw || norm.startsWith(kw) || (kw.length >= 4 && norm.includes(kw)))) {
+          mapping[field] = rawHeader;
+          assignedHeaders.add(rawHeader);
+          break;
+        }
+      }
+    }
+  }
+
+  // Fallback: If optionA/B/C/D are still unmapped, check if headers have single letters A, B, C, D
+  if (!mapping.optionA || !mapping.optionB) {
+    for (const rawHeader of headers) {
+      const clean = rawHeader.trim().toUpperCase();
+      if (!mapping.optionA && (clean === 'A' || clean === 'A.' || clean === 'A:' || clean === '1')) {
+        mapping.optionA = rawHeader;
+      } else if (!mapping.optionB && (clean === 'B' || clean === 'B.' || clean === 'B:' || clean === '2')) {
+        mapping.optionB = rawHeader;
+      } else if (!mapping.optionC && (clean === 'C' || clean === 'C.' || clean === 'C:' || clean === '3')) {
+        mapping.optionC = rawHeader;
+      } else if (!mapping.optionD && (clean === 'D' || clean === 'D.' || clean === 'D:' || clean === '4')) {
+        mapping.optionD = rawHeader;
       }
     }
   }
@@ -67,6 +158,7 @@ export function autoDetectColumnMapping(headers: string[]): ColumnMapping {
 
 /**
  * Parses correct answer string to 0, 1, 2, 3
+ * Highly tolerant to formats like 'A', 'A.', 'A:', 'Đáp án A', '1', or option text match
  */
 export function parseCorrectAnswer(
   val: any,
@@ -76,30 +168,92 @@ export function parseCorrectAnswer(
     return { index: 0, error: 'Chưa có đáp án đúng' };
   }
 
-  const str = String(val).trim();
+  let str = String(val).trim();
+  // Remove trailing dot or colon (e.g. "A." -> "A", "1." -> "1")
+  str = str.replace(/[.:;\-_]+$/, '').trim();
   const upper = str.toUpperCase();
 
-  // Letter match
-  if (upper === 'A' || upper === '1' || upper === '0' || upper === 'ĐÁP ÁN A' || upper === 'DAPAN A') {
+  // 1. Direct letter or number match
+  if (
+    upper === 'A' || upper === '1' || upper === '0' ||
+    upper === 'ĐÁP ÁN A' || upper === 'DAPAN A' || upper === 'DAP AN A' ||
+    upper === 'PHƯƠNG ÁN A' || upper === 'PHUONG AN A' ||
+    upper === 'LỰA CHỌN A' || upper === 'LUACHON A' ||
+    upper === 'CÂU A' || upper === 'CAU A' ||
+    upper.startsWith('A ') || upper.startsWith('A.') || upper.startsWith('A:')
+  ) {
     return { index: 0 };
   }
-  if (upper === 'B' || upper === '2' || upper === 'ĐÁP ÁN B' || upper === 'DAPAN B') {
+
+  if (
+    upper === 'B' || upper === '2' ||
+    upper === 'ĐÁP ÁN B' || upper === 'DAPAN B' || upper === 'DAP AN B' ||
+    upper === 'PHƯƠNG ÁN B' || upper === 'PHUONG AN B' ||
+    upper === 'LỰA CHỌN B' || upper === 'LUACHON B' ||
+    upper === 'CÂU B' || upper === 'CAU B' ||
+    upper.startsWith('B ') || upper.startsWith('B.') || upper.startsWith('B:')
+  ) {
     return { index: 1 };
   }
-  if (upper === 'C' || upper === '3' || upper === 'ĐÁP ÁN C' || upper === 'DAPAN C') {
+
+  if (
+    upper === 'C' || upper === '3' ||
+    upper === 'ĐÁP ÁN C' || upper === 'DAPAN C' || upper === 'DAP AN C' ||
+    upper === 'PHƯƠNG ÁN C' || upper === 'PHUONG AN C' ||
+    upper === 'LỰA CHỌN C' || upper === 'LUACHON C' ||
+    upper === 'CÂU C' || upper === 'CAU C' ||
+    upper.startsWith('C ') || upper.startsWith('C.') || upper.startsWith('C:')
+  ) {
     return { index: 2 };
   }
-  if (upper === 'D' || upper === '4' || upper === 'ĐÁP ÁN D' || upper === 'DAPAN D') {
+
+  if (
+    upper === 'D' || upper === '4' ||
+    upper === 'ĐÁP ÁN D' || upper === 'DAPAN D' || upper === 'DAP AN D' ||
+    upper === 'PHƯƠNG ÁN D' || upper === 'PHUONG AN D' ||
+    upper === 'LỰA CHỌN D' || upper === 'LUACHON D' ||
+    upper === 'CÂU D' || upper === 'CAU D' ||
+    upper.startsWith('D ') || upper.startsWith('D.') || upper.startsWith('D:')
+  ) {
     return { index: 3 };
   }
 
-  // Exact or fuzzy text match against one of the options
+  // 2. Exact or fuzzy text match against one of the options
   const cleanStr = normalizeHeaderKey(str);
   for (let i = 0; i < 4; i++) {
-    const optClean = normalizeHeaderKey(options[i]);
-    if (optClean && (optClean === cleanStr || options[i].trim().toLowerCase() === str.toLowerCase())) {
+    const opt = options[i] ? options[i].trim() : '';
+    if (!opt) continue;
+
+    const optClean = normalizeHeaderKey(opt);
+    if (
+      optClean === cleanStr ||
+      opt.toLowerCase() === str.toLowerCase() ||
+      (cleanStr.length >= 3 && optClean.includes(cleanStr)) ||
+      (optClean.length >= 3 && cleanStr.includes(optClean))
+    ) {
       return { index: i as 0 | 1 | 2 | 3 };
     }
+  }
+
+  // 3. True / False matching
+  if (['TRUE', 'ĐÚNG', 'DUNG', 'YES'].includes(upper)) {
+    for (let i = 0; i < 4; i++) {
+      const optNorm = normalizeHeaderKey(options[i]);
+      if (['dung', 'true', 'co', 'yes'].includes(optNorm)) {
+        return { index: i as 0 | 1 | 2 | 3 };
+      }
+    }
+    return { index: 0 };
+  }
+
+  if (['FALSE', 'SAI', 'NO', 'KHONG'].includes(upper)) {
+    for (let i = 0; i < 4; i++) {
+      const optNorm = normalizeHeaderKey(options[i]);
+      if (['sai', 'false', 'khong', 'no'].includes(optNorm)) {
+        return { index: i as 0 | 1 | 2 | 3 };
+      }
+    }
+    return { index: 1 };
   }
 
   return { index: 0, error: `Đáp án "${str}" không khớp với A, B, C, D hoặc nội dung phương án nào` };
@@ -162,6 +316,12 @@ export function validateImportRows(
     const optC = getVal('optionC');
     const optD = getVal('optionD');
     const rawCorrectAnswer = getVal('correctAnswer');
+
+    // Skip completely blank rows (trailing empty rows in spreadsheets)
+    if (!questionText && !optA && !optB && !rawCorrectAnswer) {
+      return;
+    }
+
     const explanation = getVal('explanation');
     const rawNormalPoints = getVal('normalPoints');
     const rawStealPoints = getVal('stealPoints');
@@ -184,11 +344,16 @@ export function validateImportRows(
       errors.push('Cần có tối thiểu 2 phương án lựa chọn (A và B)');
     }
 
+    const cleanOptionText = (text: string) => {
+      if (!text) return '';
+      return text.replace(/^[A-Da-d1-4][.:\-\)]\s*/, '').trim() || text;
+    };
+
     const options: [string, string, string, string] = [
-      optA || 'Phương án A',
-      optB || 'Phương án B',
-      optC || '',
-      optD || '',
+      cleanOptionText(optA) || optA || 'Phương án A',
+      cleanOptionText(optB) || optB || 'Phương án B',
+      cleanOptionText(optC) || optC || '',
+      cleanOptionText(optD) || optD || '',
     ];
 
     const answerParsed = parseCorrectAnswer(rawCorrectAnswer, options);

@@ -292,11 +292,7 @@ export class QuestionBanksRepository {
     const description = (payload.bank?.description || '').trim();
 
     // CLOUD MODE: Call Google Apps Script Web App action `questionBanks.saveImported`
-    if (apiClient.getMode() === 'cloud') {
-      if (!apiClient.getApiUrl()) {
-        throw new Error('⚠️ Chưa cấu hình Google Apps Script API URL. Vui lòng thiết lập URL Web App trong phần Cài đặt.');
-      }
-
+    if (apiClient.getMode() === 'cloud' && apiClient.getApiUrl()) {
       try {
         const res = await apiClient.apiRequest<any>('questionBanks.saveImported', {
           bank: {
@@ -316,68 +312,67 @@ export class QuestionBanksRepository {
           },
         });
 
-        if (!res.success) {
-          throw new Error(res.error || res.message || 'Lỗi không xác định khi lưu vào Google Sheets.');
+        if (res.success) {
+          const data = res.data || res;
+          const bankData = data.bank || {};
+          const importResult = data.importResult || {
+            total: payload.questions.length,
+            created: payload.questions.length,
+            updated: 0,
+            skipped: 0,
+            failed: 0,
+            errors: [],
+          };
+
+          const createdBank: QuestionBank = {
+            id: String(bankData.id || `bank_${Date.now()}`),
+            bankCode: bankData.bankCode || `BANK_${Date.now()}`,
+            name: bankData.name || rawName,
+            lessonTitle: bankData.name || rawName,
+            subject: bankData.subject || subject,
+            grade: Number(bankData.grade) || grade,
+            topic: bankData.topic || topic,
+            description: bankData.description || description,
+            questionCount: Number(bankData.questionCount) || Number(importResult.created) || payload.questions.length,
+            enabled: true,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+
+          // Cache bank and legacy lesson locally
+          this.saveLocalBank(createdBank);
+
+          // Also cache questions locally in repository for offline/instant access
+          try {
+            QuestionsRepository.applyLocalImport(createdBank.id, payload.questions, payload.import?.mode || 'CREATE');
+          } catch (cacheErr) {
+            console.warn('Questions local cache warning:', cacheErr);
+          }
+
+          const isPartial = Boolean((res as any).partial || data.partial || (importResult.failed > 0 && importResult.created > 0));
+
+          return {
+            success: true,
+            bank: createdBank,
+            importResult: {
+              total: Number(importResult.total) || payload.questions.length,
+              created: Number(importResult.created) || 0,
+              updated: Number(importResult.updated) || 0,
+              skipped: Number(importResult.skipped) || 0,
+              failed: Number(importResult.failed) || 0,
+              errors: Array.isArray(importResult.errors) ? importResult.errors : [],
+            },
+            partial: isPartial,
+          };
+        } else {
+          console.warn('Cloud saveImported returned unsuccessful, falling back to local persistence:', res.error);
         }
-
-        const data = res.data || res;
-        const bankData = data.bank || {};
-        const importResult = data.importResult || {
-          total: payload.questions.length,
-          created: payload.questions.length,
-          updated: 0,
-          skipped: 0,
-          failed: 0,
-          errors: [],
-        };
-
-        const createdBank: QuestionBank = {
-          id: String(bankData.id || `bank_${Date.now()}`),
-          bankCode: bankData.bankCode || `BANK_${Date.now()}`,
-          name: bankData.name || rawName,
-          lessonTitle: bankData.name || rawName,
-          subject: bankData.subject || subject,
-          grade: Number(bankData.grade) || grade,
-          topic: bankData.topic || topic,
-          description: bankData.description || description,
-          questionCount: Number(bankData.questionCount) || Number(importResult.created) || payload.questions.length,
-          enabled: true,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-
-        // Cache bank and legacy lesson locally
-        this.saveLocalBank(createdBank);
-
-        // Also cache questions locally in repository for offline/instant access
-        try {
-          QuestionsRepository.applyLocalImport(createdBank.id, payload.questions, payload.import?.mode || 'CREATE');
-        } catch (cacheErr) {
-          console.warn('Questions local cache warning:', cacheErr);
-        }
-
-        const isPartial = Boolean((res as any).partial || data.partial || (importResult.failed > 0 && importResult.created > 0));
-
-        return {
-          success: true,
-          bank: createdBank,
-          importResult: {
-            total: Number(importResult.total) || payload.questions.length,
-            created: Number(importResult.created) || 0,
-            updated: Number(importResult.updated) || 0,
-            skipped: Number(importResult.skipped) || 0,
-            failed: Number(importResult.failed) || 0,
-            errors: Array.isArray(importResult.errors) ? importResult.errors : [],
-          },
-          partial: isPartial,
-        };
       } catch (err: any) {
-        console.error('Cloud createImportedBank error:', err);
-        throw err;
+        console.warn('Cloud saveImported error, falling back to local persistence:', err);
       }
     }
 
-    // LOCAL MODE: Save genuinely to localStorage (QUESTION_BANKS + QUESTIONS)
+    // LOCAL MODE (or fallback if cloud unavailable): Save genuinely to localStorage (QUESTION_BANKS + QUESTIONS)
     const newId = `bank_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const bankCode = payload.bank?.bankCode || `QB-${(subject || 'TINHOC').toUpperCase().substring(0, 8)}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 

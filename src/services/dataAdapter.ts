@@ -122,17 +122,26 @@ export class EduplayDataAdapter {
       try {
         const cloudBanks = await QuestionBanksRepository.list();
         if (cloudBanks && cloudBanks.length > 0) {
-          return cloudBanks.map((b: any) => ({
-            id: b.id,
-            lessonTitle: b.name || b.bankCode || 'Bộ câu hỏi',
-            subject: b.subject || 'Tin học',
-            grade: b.grade || 5,
-            topic: b.topic || '',
-            description: b.description || '',
-            enabled: b.enabled !== false,
-            questions: [],
-            updatedAt: b.updatedAt || new Date().toISOString(),
-          }));
+          return cloudBanks.map((b: any) => {
+            const localLesson = QuestionBankRepository.getLessonById(b.id);
+            const questions = (b.questions && b.questions.length > 0)
+              ? b.questions
+              : (localLesson?.questions && localLesson.questions.length > 0)
+              ? localLesson.questions
+              : [];
+            return {
+              id: b.id,
+              lessonTitle: b.name || b.bankCode || 'Bộ câu hỏi',
+              subject: b.subject || 'Tin học',
+              grade: b.grade || 5,
+              topic: b.topic || '',
+              description: b.description || '',
+              enabled: b.enabled !== false,
+              questions,
+              questionCount: b.questionCount || questions.length,
+              updatedAt: b.updatedAt || new Date().toISOString(),
+            };
+          });
         }
       } catch (err) {
         console.warn('Failed to load banks from cloud, using local fallback', err);

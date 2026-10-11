@@ -80,8 +80,12 @@ class EduplayApiClient {
       this.currentMode = savedMode;
     } else if (envMode === 'cloud') {
       this.currentMode = 'cloud';
+    } else if (envMode === 'local') {
+      this.currentMode = 'local';
+    } else if (this.apiUrl) {
+      this.currentMode = 'cloud';
     } else {
-      this.currentMode = 'cloud'; // Default to cloud for teacher experience
+      this.currentMode = 'local'; // Default to local if no Google Apps Script API URL
     }
 
     // 3. Listen to browser online/offline events
