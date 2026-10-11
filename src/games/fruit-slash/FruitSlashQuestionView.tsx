@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Clock, CheckCircle2, XCircle, Zap, Shield, Sparkles } from 'lucide-react';
+import { Clock, CheckCircle2, XCircle, Zap, Sparkles } from 'lucide-react';
 import { Question } from '../../types';
 import { HandTrackResult } from './types';
 import { soundService } from '../../services/soundService';
@@ -14,7 +13,7 @@ interface FruitSlashQuestionViewProps {
   team2Name: string;
   isStealMode: boolean;
   timeLimit: number;
-  activeHand: HandTrackResult;
+  activeHand?: HandTrackResult;
   isDoublePointsActive: boolean;
   onAnswerSelected: (selectedIndex: number) => void;
   onTimeExpired: () => void;
@@ -32,7 +31,6 @@ export const FruitSlashQuestionView: React.FC<FruitSlashQuestionViewProps> = ({
   team2Name,
   isStealMode,
   timeLimit,
-  activeHand,
   isDoublePointsActive,
   onAnswerSelected,
   onTimeExpired,
@@ -43,7 +41,6 @@ export const FruitSlashQuestionView: React.FC<FruitSlashQuestionViewProps> = ({
   const [timeLeft, setTimeLeft] = useState<number>(timeLimit);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const answerRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const lastSlashCheckRef = useRef<number>(0);
 
   // Synchronize timer
   useEffect(() => {
@@ -69,43 +66,6 @@ export const FruitSlashQuestionView: React.FC<FruitSlashQuestionViewProps> = ({
 
     return () => clearInterval(timer);
   }, [isAnswerSubmitted, onTimeExpired]);
-
-  // Hand Slash on Answer Box hit-testing
-  useEffect(() => {
-    if (isAnswerSubmitted) return;
-    if (!activeHand.isSlashing && activeHand.speed < 100) return;
-
-    const now = performance.now();
-    if (now - lastSlashCheckRef.current < 400) return; // Cooldown
-
-    const container = containerRef.current;
-    if (!container) return;
-    const containerRect = container.getBoundingClientRect();
-
-    // Active hand coordinates in viewport px
-    const handX = containerRect.left + (activeHand.x / 100) * containerRect.width;
-    const handY = containerRect.top + (activeHand.y / 100) * containerRect.height;
-
-    // Check collision with answer boxes
-    for (let idx = 0; idx < question.options.length; idx++) {
-      const boxEl = answerRefs.current[idx];
-      if (!boxEl) continue;
-
-      const rect = boxEl.getBoundingClientRect();
-      const margin = 15; // Expanded hit area for responsive feel
-      if (
-        handX >= rect.left - margin &&
-        handX <= rect.right + margin &&
-        handY >= rect.top - margin &&
-        handY <= rect.bottom + margin
-      ) {
-        lastSlashCheckRef.current = now;
-        soundService.playSlashWhoosh();
-        onAnswerSelected(idx);
-        break;
-      }
-    }
-  }, [activeHand, isAnswerSubmitted, onAnswerSelected, question.options.length]);
 
   const activeTeamName = activeTeam === 'team1' ? team1Name : team2Name;
   const activeColor = activeTeam === 'team1' ? 'text-sky-400' : 'text-amber-400';
@@ -171,8 +131,8 @@ export const FruitSlashQuestionView: React.FC<FruitSlashQuestionViewProps> = ({
         <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-black text-white leading-snug tracking-tight">
           {question.question}
         </h2>
-        <p className="text-xs text-sky-300/80 mt-2">
-          👉 {activeTeamName}: Vung tay chém hoặc click vào ô đáp án A, B, C, D!
+        <p className="text-xs sm:text-sm text-sky-300 font-medium mt-2">
+          👉 {activeTeamName}: Bấm chọn đáp án hoặc bấm phím <span className="font-bold text-amber-300">1, 2, 3, 4</span> (hoặc <span className="font-bold text-amber-300">A, B, C, D</span>)
         </p>
       </div>
 
@@ -244,19 +204,6 @@ export const FruitSlashQuestionView: React.FC<FruitSlashQuestionViewProps> = ({
           );
         })}
       </div>
-
-      {/* Hand tracking visual cursor indicator inside question */}
-      {activeHand.detected && (
-        <div
-          className="absolute w-8 h-8 pointer-events-none -translate-x-1/2 -translate-y-1/2 z-30 transition-transform duration-75"
-          style={{
-            left: `${activeHand.x}%`,
-            top: `${activeHand.y}%`,
-          }}
-        >
-          <div className="w-full h-full rounded-full border-2 border-white bg-sky-400/30 shadow-lg shadow-sky-400/50 animate-ping" />
-        </div>
-      )}
     </div>
   );
 };

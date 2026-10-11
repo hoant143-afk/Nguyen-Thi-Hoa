@@ -110,11 +110,13 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
   // Webcam Management
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [isBankModalOpen, setIsBankModalOpen] = useState<boolean>(false);
   const [selectedLessonId, setSelectedLessonId] = useState<string>('k1_toan_b1');
+  const [showDebug, setShowDebug] = useState<boolean>(false);
 
   // Hand tracking state
   const detectorRef = useRef<FruitSlashDetector>(new FruitSlashDetector());
@@ -143,6 +145,11 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
     lastSlashTimestamp: 0,
   });
 
+  const latestHandsRef = useRef<{ team1: HandTrackResult; team2: HandTrackResult }>({
+    team1: detectorRef.current.getEmptyResult('team1'),
+    team2: detectorRef.current.getEmptyResult('team2'),
+  });
+
   const roundStartTimestampRef = useRef<number>(0);
   const animFrameRef = useRef<number | null>(null);
 
@@ -152,25 +159,46 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
       if (streamRef.current && streamRef.current.active) {
         if (videoRef.current && videoRef.current.srcObject !== streamRef.current) {
           videoRef.current.srcObject = streamRef.current;
+          videoRef.current.muted = true;
+          videoRef.current.defaultMuted = true;
+          videoRef.current.playsInline = true;
           videoRef.current.play().catch(() => {});
         }
         detectorRef.current.setVideoElement(videoRef.current);
+        setCameraStream(streamRef.current);
+        setCameraError(null);
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-        audio: false,
-      });
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          audio: false,
+        });
+      } catch {
+        // Fallback to basic constraint if overconstrained
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
+
       streamRef.current = stream;
+      setCameraStream(stream);
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+        videoRef.current.defaultMuted = true;
+        videoRef.current.playsInline = true;
         videoRef.current.play().catch(() => {});
+        detectorRef.current.setVideoElement(videoRef.current);
       }
-      detectorRef.current.setVideoElement(videoRef.current);
       setCameraError(null);
     } catch (err: any) {
       console.warn('Webcam stream error:', err);
-      setCameraError(err?.message || 'Không thể kết nối webcam. Vui lòng cấp quyền camera trong trình duyệt.');
+      setCameraError(err?.message || 'Không thể kết nối webcam. Vui lòng kiểm tra quyền camera trong trình duyệt.');
     }
   }, []);
 
@@ -179,11 +207,11 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    setCameraStream(null);
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
-    detectorRef.current.destroy();
   }, []);
 
   useEffect(() => {
@@ -191,12 +219,20 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
     return () => stopCamera();
   }, [startCamera, stopCamera]);
 
-  // Main Detection Loop
+  // Main High-Speed Detection Loop (Throttles React state to 4 FPS for UI, runs detector at 60 FPS for Arena)
   useEffect(() => {
+    let lastUiUpdate = 0;
     const loop = (now: number) => {
-      const result = detectorRef.current.processFrame(now);
-      setTeam1Hand(result.team1);
-      setTeam2Hand(result.team2);
+      const activeVideo = videoRef.current;
+      const result = detectorRef.current.processFrame(now, activeVideo);
+      latestHandsRef.current = { team1: result.team1, team2: result.team2 };
+
+      // Throttle React state updates to UI badges (4 FPS) to eliminate lag/freezing
+      if (now - lastUiUpdate > 250) {
+        lastUiUpdate = now;
+        setTeam1Hand(result.team1);
+        setTeam2Hand(result.team2);
+      }
       animFrameRef.current = requestAnimationFrame(loop);
     };
 
@@ -408,6 +444,7 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
   // Manual slash trigger for mouse fallback
   const handleManualSlash = (team: 'team1' | 'team2', from: { x: number; y: number }, to: { x: number; y: number }) => {
     detectorRef.current.triggerManualSlash(team, from, to, performance.now());
+    latestHandsRef.current = detectorRef.current.getLatestResults(performance.now());
   };
 
   // Answer selected in Question View
@@ -545,23 +582,44 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
           e.preventDefault();
           handleProceedNext();
         }
-      } else if (['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4'].includes(e.code)) {
+      } else if (
+        [
+          'Digit1',
+          'Digit2',
+          'Digit3',
+          'Digit4',
+          'Numpad1',
+          'Numpad2',
+          'Numpad3',
+          'Numpad4',
+          'KeyA',
+          'KeyB',
+          'KeyC',
+          'KeyD',
+        ].includes(e.code)
+      ) {
         if (gameState === 'QUESTION' || gameState === 'ANSWER' || gameState === 'STEAL') {
           const idxMap: Record<string, number> = {
             Digit1: 0,
             Numpad1: 0,
+            KeyA: 0,
             Digit2: 1,
             Numpad2: 1,
+            KeyB: 1,
             Digit3: 2,
             Numpad3: 2,
+            KeyC: 2,
             Digit4: 3,
             Numpad4: 3,
+            KeyD: 3,
           };
           const selected = idxMap[e.code];
           if (selected !== undefined && currentQ && selected < currentQ.options.length) {
             handleAnswerSelected(selected);
           }
         }
+      } else if (e.key === 'd' || e.key === 'D') {
+        setShowDebug((prev) => !prev);
       }
     };
 
@@ -571,13 +629,32 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none overflow-x-hidden">
-      {/* Hidden Master Video element for camera stream */}
+      {/* Master Video element for camera stream and vision detection */}
       <video
         ref={videoRef}
         playsInline
         muted
         autoPlay
-        className="fixed -top-[9999px] -left-[9999px] w-1 h-1 opacity-0 pointer-events-none"
+        width={640}
+        height={480}
+        onLoadedMetadata={(e) => {
+          detectorRef.current.setVideoElement(e.currentTarget);
+          e.currentTarget.play().catch(() => {});
+        }}
+        onCanPlay={(e) => {
+          detectorRef.current.setVideoElement(e.currentTarget);
+          e.currentTarget.play().catch(() => {});
+        }}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '640px',
+          height: '480px',
+          opacity: 0.001,
+          pointerEvents: 'none',
+          zIndex: -50,
+        }}
       />
 
       {/* TOP HEADER / NAVIGATION */}
@@ -644,6 +721,22 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
               <RotateCcw className="w-4 h-4" />
             </button>
           )}
+
+          <button
+            onClick={() => setShowDebug((prev) => !prev)}
+            title="Bật/Tắt hiển thị điểm tin cậy nhận diện bàn tay (Phím D)"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              showDebug
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-xs'
+                : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+            }`}
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Debug Tay:</span>
+            <span className={showDebug ? 'text-emerald-400 font-mono' : 'text-slate-400'}>
+              {showDebug ? 'BẬT' : 'TẮT'}
+            </span>
+          </button>
 
           <button
             onClick={toggleSound}
@@ -873,7 +966,38 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
                 </p>
               </div>
 
-              {/* Camera Status & Bottom CTAs */}
+              {/* Camera Status & Hand Detection Banner */}
+              <div className={`p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs border transition-all ${
+                cameraStream && !cameraError
+                  ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+                  : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${cameraStream && !cameraError ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                  <span className="font-bold">
+                    {cameraStream && !cameraError
+                      ? 'Webcam đã sẵn sàng'
+                      : (cameraError || 'Chưa nhận được tín hiệu camera')}
+                  </span>
+                  {cameraStream && !cameraError && (
+                    <span className="text-[11px] text-slate-300 pl-2 border-l border-emerald-500/30">
+                      ✋ {settings.team1Name}: {team1Hand.detected ? '✅ Đã nhận diện' : '⏳ Đưa tay lên để quét'} | ✋ {settings.team2Name}: {team2Hand.detected ? '✅ Đã nhận diện' : '⏳ Đưa tay lên để quét'}
+                    </span>
+                  )}
+                </div>
+
+                {(!cameraStream || cameraError) && (
+                  <button
+                    type="button"
+                    onClick={() => startCamera()}
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-md transition-all"
+                  >
+                    Bật lại Camera
+                  </button>
+                )}
+              </div>
+
+              {/* Bottom CTAs */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
                 <button
                   type="button"
@@ -908,9 +1032,10 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
           <div className="flex-1 flex flex-col min-h-[540px] md:min-h-[620px] h-full relative">
             <FruitSlashArena
               settings={settings}
-              videoStream={streamRef.current}
+              videoStream={cameraStream || streamRef.current}
               team1Hand={team1Hand}
               team2Hand={team2Hand}
+              getLatestHands={() => latestHandsRef.current}
               team1Score={team1Stats.score}
               team2Score={team2Stats.score}
               team1FruitsSliced={team1Stats.fruitsSliced}
@@ -924,6 +1049,8 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
               onBoomHit={handleBoomHit}
               onSpecialItemSliced={handleSpecialItemSliced}
               onManualSlash={handleManualSlash}
+              showDebug={showDebug}
+              onToggleDebug={() => setShowDebug((prev) => !prev)}
             />
 
             {/* CAMERA_READY OVERLAY (Before starting the slash countdown) */}
@@ -1345,6 +1472,9 @@ export const FruitSlashGame: React.FC<FruitSlashGameProps> = ({ onBackToEduplay 
                     if (el && streamRef.current && el.srcObject !== streamRef.current) {
                       el.srcObject = streamRef.current;
                       el.play().catch(() => {});
+                    }
+                    if (el) {
+                      detectorRef.current.setVideoElement(el);
                     }
                   }}
                   autoPlay

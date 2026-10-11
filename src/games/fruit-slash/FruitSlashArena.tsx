@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import {
   FlyingFruit,
   FruitKind,
@@ -14,6 +14,7 @@ interface FruitSlashArenaProps {
   videoStream: MediaStream | null;
   team1Hand: HandTrackResult;
   team2Hand: HandTrackResult;
+  getLatestHands?: () => { team1: HandTrackResult; team2: HandTrackResult };
   team1Score: number;
   team2Score: number;
   team1FruitsSliced: number;
@@ -27,6 +28,8 @@ interface FruitSlashArenaProps {
   onBoomHit: (fruit: FlyingFruit, team: 'team1' | 'team2') => void;
   onSpecialItemSliced: (fruit: FlyingFruit, team: 'team1' | 'team2') => void;
   onManualSlash?: (team: 'team1' | 'team2', from: { x: number; y: number }, to: { x: number; y: number }) => void;
+  showDebug?: boolean;
+  onToggleDebug?: () => void;
 }
 
 const FRUIT_PALETTE: Record<FruitKind, { primary: string; secondary: string; emoji: string }> = {
@@ -45,6 +48,7 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
   videoStream,
   team1Hand,
   team2Hand,
+  getLatestHands,
   team1Score,
   team2Score,
   team1FruitsSliced,
@@ -58,7 +62,30 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
   onBoomHit,
   onSpecialItemSliced,
   onManualSlash,
+  showDebug,
+  onToggleDebug,
 }) => {
+  const [internalDebug, setInternalDebug] = useState<boolean>(false);
+  const isDebugActive = showDebug !== undefined ? showDebug : internalDebug;
+  const toggleDebug = onToggleDebug || (() => setInternalDebug((prev) => !prev));
+
+  // Ref to hold latest hand data without triggering React re-renders at 60 FPS
+  const handsRef = useRef({ team1: team1Hand, team2: team2Hand });
+  useEffect(() => {
+    handsRef.current = { team1: team1Hand, team2: team2Hand };
+  }, [team1Hand, team2Hand]);
+
+  // Toggle debug with 'D' key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'd' || e.key === 'D') {
+        toggleDebug();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleDebug]);
+
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fruitsRef = useRef<FlyingFruit[]>([]);
@@ -75,6 +102,9 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
     if (videoElRef.current && videoStream) {
       if (videoElRef.current.srcObject !== videoStream) {
         videoElRef.current.srcObject = videoStream;
+        videoElRef.current.muted = true;
+        videoElRef.current.defaultMuted = true;
+        videoElRef.current.playsInline = true;
         videoElRef.current.play().catch(() => {});
       }
     }
@@ -253,6 +283,70 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
     }
   };
 
+  // Helper to slice a fruit cleanly with full effects
+  const sliceFruit = useCallback(
+    (
+      fruit: FlyingFruit,
+      team: 'team1' | 'team2',
+      slashAngle: number,
+      timestamp: number
+    ) => {
+      fruit.sliced = true;
+      fruit.sliceAngle = slashAngle;
+      fruit.slicedBy = team;
+      fruit.sliceTimestamp = timestamp;
+      fruit.sliceProgress = 0;
+
+      // Split half velocity
+      const perpAngle = slashAngle + Math.PI / 2;
+      const splitSpeed = 5 + Math.random() * 4;
+      fruit.sliceHalf1Offset = {
+        x: Math.cos(perpAngle) * splitSpeed,
+        y: Math.sin(perpAngle) * splitSpeed,
+        r: (Math.random() - 0.5) * 0.25,
+      };
+      fruit.sliceHalf2Offset = {
+        x: -Math.cos(perpAngle) * splitSpeed,
+        y: -Math.sin(perpAngle) * splitSpeed,
+        r: (Math.random() - 0.5) * 0.25,
+      };
+
+      if (fruit.isBoom) {
+        // Boom hit!
+        shakeRef.current = 28; // Screen shake
+        createJuiceParticles(fruit.x, fruit.y, '#EF4444', 40, 'spark');
+        createJuiceParticles(fruit.x, fruit.y, '#71717A', 30, 'smoke');
+        soundService.playBoomExplosion();
+        onBoomHit(fruit, team);
+      } else if (fruit.isSpecial) {
+        // Special item hit!
+        const color =
+          fruit.specialType === 'golden_fruit'
+            ? '#FBBF24'
+            : fruit.specialType === 'freeze'
+            ? '#38BDF8'
+            : fruit.specialType === 'shield'
+            ? '#60A5FA'
+            : '#34D399';
+        createJuiceParticles(fruit.x, fruit.y, color, 35, 'golden');
+        soundService.playFruitSlice();
+        soundService.playBonusItem();
+        onSpecialItemSliced(fruit, team);
+      } else {
+        // Normal Fruit sliced!
+        const pal = FRUIT_PALETTE[fruit.kind as FruitKind] || {
+          primary: '#EF4444',
+          secondary: '#FEF08A',
+        };
+        createJuiceParticles(fruit.x, fruit.y, pal.primary, 26, 'juice');
+        createJuiceParticles(fruit.x, fruit.y, pal.secondary, 16, 'juice');
+        soundService.playFruitSlice();
+        onFruitSliced(fruit, team, timestamp);
+      }
+    },
+    [onFruitSliced, onBoomHit, onSpecialItemSliced]
+  );
+
   // Check collision between a slash segment and active fruits
   const checkSlashCollision = useCallback(
     (
@@ -268,12 +362,16 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
       const p2 = { x: (to.x / 100) * canvasW, y: (to.y / 100) * canvasH };
 
       const slashLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      if (slashLen < 8) return; // Ignore microscopic jitter
+      if (slashLen < 4) return; // Ignore micro-jitter
 
       const slashAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
 
       fruitsRef.current.forEach((fruit) => {
         if (fruit.sliced) return;
+
+        // Ensure fruit is within player's side or middle neutral zone
+        if (team === 'team1' && fruit.x > canvasW * 0.58) return;
+        if (team === 'team2' && fruit.x < canvasW * 0.42) return;
 
         // Distance from point (fruit.x, fruit.y) to segment (p1, p2)
         const dx = p2.x - p1.x;
@@ -285,90 +383,46 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
         const nearestY = p1.y + t * dy;
         const dist = Math.hypot(fruit.x - nearestX, fruit.y - nearestY);
 
-        if (dist <= fruit.radius * 1.35) {
-          // HIT!
-          fruit.sliced = true;
-          fruit.sliceAngle = slashAngle;
-          fruit.slicedBy = team;
-          fruit.sliceTimestamp = timestamp;
-          fruit.sliceProgress = 0;
-
-          // Split half velocity
-          const perpAngle = slashAngle + Math.PI / 2;
-          const splitSpeed = 5 + Math.random() * 4;
-          fruit.sliceHalf1Offset = {
-            x: Math.cos(perpAngle) * splitSpeed,
-            y: Math.sin(perpAngle) * splitSpeed,
-            r: (Math.random() - 0.5) * 0.25,
-          };
-          fruit.sliceHalf2Offset = {
-            x: -Math.cos(perpAngle) * splitSpeed,
-            y: -Math.sin(perpAngle) * splitSpeed,
-            r: (Math.random() - 0.5) * 0.25,
-          };
-
-          if (fruit.isBoom) {
-            // Boom hit!
-            shakeRef.current = 28; // Screen shake
-            createJuiceParticles(fruit.x, fruit.y, '#EF4444', 40, 'spark');
-            createJuiceParticles(fruit.x, fruit.y, '#71717A', 30, 'smoke');
-            soundService.playBoomExplosion();
-            onBoomHit(fruit, team);
-          } else if (fruit.isSpecial) {
-            // Special item hit!
-            const color =
-              fruit.specialType === 'golden_fruit'
-                ? '#FBBF24'
-                : fruit.specialType === 'freeze'
-                ? '#38BDF8'
-                : fruit.specialType === 'shield'
-                ? '#60A5FA'
-                : '#34D399';
-            createJuiceParticles(fruit.x, fruit.y, color, 35, 'golden');
-            soundService.playFruitSlice();
-            soundService.playBonusItem();
-            onSpecialItemSliced(fruit, team);
-          } else {
-            // Normal Fruit sliced!
-            const pal = FRUIT_PALETTE[fruit.kind as FruitKind] || {
-              primary: '#EF4444',
-              secondary: '#FEF08A',
-            };
-            createJuiceParticles(fruit.x, fruit.y, pal.primary, 26, 'juice');
-            createJuiceParticles(fruit.x, fruit.y, pal.secondary, 16, 'juice');
-            soundService.playFruitSlice();
-            onFruitSliced(fruit, team, timestamp);
-          }
+        if (dist <= fruit.radius * 1.45) {
+          sliceFruit(fruit, team, slashAngle, timestamp);
         }
       });
     },
-    [onFruitSliced, onBoomHit, onSpecialItemSliced]
+    [sliceFruit]
   );
 
-  // Monitor hand slash events from detector
-  useEffect(() => {
-    if (!isRoundActive) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  // Proximity hand reticle hit (when hand moves rapidly across fruit)
+  const checkProximityHit = useCallback(
+    (
+      normX: number,
+      normY: number,
+      speed: number,
+      team: 'team1' | 'team2',
+      canvasW: number,
+      canvasH: number,
+      timestamp: number
+    ) => {
+      if (speed < 24) return; // Must have genuine moving slashing gesture
+      const px = (normX / 100) * canvasW;
+      const py = (normY / 100) * canvasH;
 
-    const now = performance.now();
+      fruitsRef.current.forEach((fruit) => {
+        if (fruit.sliced) return;
 
-    // Check Team 1 slash
-    if (team1Hand.isSlashing && team1Hand.trail.length >= 2) {
-      const p1 = team1Hand.trail[team1Hand.trail.length - 2];
-      const p2 = team1Hand.trail[team1Hand.trail.length - 1];
-      checkSlashCollision(p1, p2, 'team1', canvas.width, canvas.height, now);
-    }
+        // Ensure fruit is within player's side or middle neutral zone
+        if (team === 'team1' && fruit.x > canvasW * 0.58) return;
+        if (team === 'team2' && fruit.x < canvasW * 0.42) return;
 
-    // Check Team 2 slash
-    if (team2Hand.isSlashing && team2Hand.trail.length >= 2) {
-      const p1 = team2Hand.trail[team2Hand.trail.length - 2];
-      const p2 = team2Hand.trail[team2Hand.trail.length - 1];
-      checkSlashCollision(p1, p2, 'team2', canvas.width, canvas.height, now);
-    }
-  }, [team1Hand, team2Hand, isRoundActive, checkSlashCollision]);
+        const dist = Math.hypot(fruit.x - px, fruit.y - py);
+        if (dist <= fruit.radius * 1.35) {
+          sliceFruit(fruit, team, Math.random() * Math.PI * 2, timestamp);
+        }
+      });
+    },
+    [sliceFruit]
+  );
 
-  // Main game physics & rendering animation loop
+  // Main game physics & rendering animation loop (Rock-solid 60 FPS, no React teardown)
   useEffect(() => {
     let animId: number;
     const canvas = canvasRef.current;
@@ -391,6 +445,11 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
       const w = canvas.width;
       const h = canvas.height;
 
+      // Read latest hands directly without React re-render churn
+      const currentHands = getLatestHands ? getLatestHands() : handsRef.current;
+      const t1 = currentHands.team1;
+      const t2 = currentHands.team2;
+
       // Handle screen shake
       let shakeOffsetX = 0;
       let shakeOffsetY = 0;
@@ -410,6 +469,28 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
         if (time - lastSpawnTimeRef.current >= config.spawnInterval) {
           spawnFruitWave(w, h);
           lastSpawnTimeRef.current = time;
+        }
+
+        // Live collision detection for Team 1
+        if (t1.detected) {
+          if (t1.trail.length >= 2) {
+            const startIdx = Math.max(0, t1.trail.length - 4);
+            for (let i = startIdx; i < t1.trail.length - 1; i++) {
+              checkSlashCollision(t1.trail[i], t1.trail[i + 1], 'team1', w, h, time);
+            }
+          }
+          checkProximityHit(t1.x, t1.y, t1.speed, 'team1', w, h, time);
+        }
+
+        // Live collision detection for Team 2
+        if (t2.detected) {
+          if (t2.trail.length >= 2) {
+            const startIdx = Math.max(0, t2.trail.length - 4);
+            for (let i = startIdx; i < t2.trail.length - 1; i++) {
+              checkSlashCollision(t2.trail[i], t2.trail[i + 1], 'team2', w, h, time);
+            }
+          }
+          checkProximityHit(t2.x, t2.y, t2.speed, 'team2', w, h, time);
         }
       }
 
@@ -459,19 +540,24 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
       });
 
       // 4. Draw Hand Slashes / Trails directly over player's camera view
-      if (team1Hand.trail.length > 1) {
-        drawSlashRibbon(ctx, team1Hand.trail, '#38BDF8', '#0284C7', w, h);
+      if (t1.trail.length > 1) {
+        drawSlashRibbon(ctx, t1.trail, '#38BDF8', '#0284C7', w, h);
       }
-      if (team2Hand.trail.length > 1) {
-        drawSlashRibbon(ctx, team2Hand.trail, '#FB923C', '#EA580C', w, h);
+      if (t2.trail.length > 1) {
+        drawSlashRibbon(ctx, t2.trail, '#FB923C', '#EA580C', w, h);
       }
 
       // 5. Draw Hand Reticles on screen
-      if (team1Hand.detected) {
-        drawHandReticle(ctx, team1Hand.x, team1Hand.y, '#38BDF8', settings.team1Name, w, h, team1Hand.isSlashing);
+      if (t1.detected) {
+        drawHandReticle(ctx, t1.x, t1.y, '#38BDF8', settings.team1Name, w, h, t1.isSlashing);
       }
-      if (team2Hand.detected) {
-        drawHandReticle(ctx, team2Hand.x, team2Hand.y, '#FB923C', settings.team2Name, w, h, team2Hand.isSlashing);
+      if (t2.detected) {
+        drawHandReticle(ctx, t2.x, t2.y, '#FB923C', settings.team2Name, w, h, t2.isSlashing);
+      }
+
+      // 6. Draw Visual Debug Overlay (Landmark Confidence Scores, Skeleton & Diagnostics)
+      if (isDebugActive) {
+        drawHandDebugOverlay(ctx, w, h, t1, t2, settings.team1Name, settings.team2Name);
       }
 
       ctx.restore();
@@ -483,7 +569,17 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', updateCanvasSize);
     };
-  }, [isRoundActive, spawnFruitWave, getDifficultyConfig, team1Hand, team2Hand, settings.team1Name, settings.team2Name]);
+  }, [
+    isRoundActive,
+    spawnFruitWave,
+    getDifficultyConfig,
+    settings.team1Name,
+    settings.team2Name,
+    isDebugActive,
+    checkSlashCollision,
+    checkProximityHit,
+    getLatestHands,
+  ]);
 
   // Mouse / Touch swipe simulation for testing or teacher fallback
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -523,6 +619,36 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
     lastMousePosRef.current = null;
   };
 
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = ((touch.clientX - rect.left) / rect.width) * 100;
+    const y = ((touch.clientY - rect.top) / rect.height) * 100;
+    isMouseDownRef.current = true;
+    lastMousePosRef.current = { x, y };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isMouseDownRef.current || !lastMousePosRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas || e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = ((touch.clientX - rect.left) / rect.width) * 100;
+    const y = ((touch.clientY - rect.top) / rect.height) * 100;
+    const team: 'team1' | 'team2' = x < 50 ? 'team1' : 'team2';
+    const from = lastMousePosRef.current;
+    const to = { x, y };
+
+    checkSlashCollision(from, to, team, canvas.width, canvas.height, performance.now());
+    if (onManualSlash) {
+      onManualSlash(team, from, to);
+    }
+    lastMousePosRef.current = to;
+  };
+
   return (
     <div className="relative w-full h-full min-h-[520px] flex-1 select-none overflow-hidden rounded-3xl border-3 border-slate-800 shadow-2xl bg-black">
       {/* 1. EXPANDED LIVE WEBCAM VIDEO (BACKGROUND FOR ENTIRE ARENA) */}
@@ -533,6 +659,13 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
         muted
         className="absolute inset-0 w-full h-full object-cover -scale-x-100 opacity-90"
       />
+
+      {/* Fallback banner if videoStream is not active yet */}
+      {!videoStream && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 px-5 py-2.5 rounded-2xl bg-amber-500/95 text-slate-950 font-black text-xs flex items-center gap-2 shadow-2xl backdrop-blur-md">
+          <span>📷 Đang kết nối webcam... Bạn vẫn có thể dùng chuột hoặc vuốt màn hình để chém trực tiếp!</span>
+        </div>
+      )}
 
       {/* Ambient Contrast Tint */}
       <div className="absolute inset-0 bg-slate-950/25 pointer-events-none" />
@@ -567,9 +700,13 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
                   }`}
                 />
                 <span className="hidden sm:inline">
-                  {team1Hand.detected ? 'Đã nhận diện tay' : 'Chưa nhận diện tay'}
+                  {team1Hand.detected
+                    ? `Đã nhận diện (${Math.round((team1Hand.confidence ?? 0) * 100)}%)`
+                    : 'Chưa nhận diện tay'}
                 </span>
-                <span className="sm:hidden">{team1Hand.detected ? '✋ Tay OK' : '✋ Chưa có tay'}</span>
+                <span className="sm:hidden">
+                  {team1Hand.detected ? `✋ OK ${Math.round((team1Hand.confidence ?? 0) * 100)}%` : '✋ Chưa có'}
+                </span>
               </span>
             </div>
 
@@ -624,9 +761,13 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
                   }`}
                 />
                 <span className="hidden sm:inline">
-                  {team2Hand.detected ? 'Đã nhận diện tay' : 'Chưa nhận diện tay'}
+                  {team2Hand.detected
+                    ? `Đã nhận diện (${Math.round((team2Hand.confidence ?? 0) * 100)}%)`
+                    : 'Chưa nhận diện tay'}
                 </span>
-                <span className="sm:hidden">{team2Hand.detected ? '✋ Tay OK' : '✋ Chưa có tay'}</span>
+                <span className="sm:hidden">
+                  {team2Hand.detected ? `✋ OK ${Math.round((team2Hand.confidence ?? 0) * 100)}%` : '✋ Chưa có'}
+                </span>
               </span>
             </div>
 
@@ -664,6 +805,10 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleMouseUp}
+        onTouchCancel={handleMouseUp}
         className="absolute inset-0 w-full h-full block cursor-crosshair touch-none z-20"
       />
 
@@ -685,6 +830,23 @@ export const FruitSlashArena: React.FC<FruitSlashArenaProps> = ({
           {roundNotification}
         </div>
       )}
+
+      {/* 7. FLOATING DEBUG TOGGLE BUTTON */}
+      <button
+        type="button"
+        onClick={toggleDebug}
+        title="Bật/Tắt hiển thị điểm tin cậy nhận diện bàn tay (Phím D)"
+        className={`absolute bottom-3 right-3 z-30 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-lg backdrop-blur-md border ${
+          isDebugActive
+            ? 'bg-emerald-950/85 text-emerald-300 border-emerald-400/60 shadow-emerald-500/20'
+            : 'bg-slate-900/80 text-slate-400 border-slate-700 hover:text-white'
+        }`}
+      >
+        <span>🔬 Debug Bàn Tay:</span>
+        <span className={`font-mono font-black ${isDebugActive ? 'text-emerald-400' : 'text-slate-400'}`}>
+          {isDebugActive ? 'BẬT' : 'TẮT'}
+        </span>
+      </button>
     </div>
   );
 };
@@ -939,4 +1101,290 @@ function drawHandReticle(
   ctx.fillText(label, 0, 36);
 
   ctx.restore();
+}
+
+// Helper: Safely draw rounded rectangle on canvas
+function drawRoundedBox(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+}
+
+// Helper: Draw visual debug overlay with hand landmark confidence scores & skeleton
+function drawHandDebugOverlay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  team1Hand: HandTrackResult,
+  team2Hand: HandTrackResult,
+  team1Name: string,
+  team2Name: string
+) {
+  ctx.save();
+
+  // 1. TOP DIAGNOSTIC HUD BAR
+  const barH = 34;
+  const barY = 10;
+  const barW = width - 24;
+  const barX = 12;
+
+  ctx.fillStyle = 'rgba(2, 6, 23, 0.88)';
+  drawRoundedBox(ctx, barX, barY, barW, barH, 8);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
+  ctx.lineWidth = 1;
+  drawRoundedBox(ctx, barX, barY, barW, barH, 8);
+  ctx.stroke();
+
+  // Left Section: Team 1 Status & Landmark Confidence
+  const t1Conf = Math.round((team1Hand.confidence ?? 0) * 100);
+  const t1ConfColor =
+    !team1Hand.detected ? '#94A3B8' : t1Conf >= 75 ? '#10B981' : t1Conf >= 45 ? '#F59E0B' : '#EF4444';
+  const t1Mode = team1Hand.trackingMode === 'touch' ? 'TOUCH' : 'CV 21-PTS';
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillStyle = '#38BDF8';
+  ctx.fillText(`[T1 ${team1Name.toUpperCase()}]`, barX + 12, barY + barH / 2);
+
+  ctx.fillStyle = team1Hand.detected ? '#CBD5E1' : '#64748B';
+  ctx.font = '10px monospace';
+  ctx.fillText(team1Hand.detected ? `${t1Mode} CONF:` : 'TÌM TAY...', barX + 120, barY + barH / 2);
+
+  ctx.fillStyle = t1ConfColor;
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(`${t1Conf}%`, barX + 225, barY + barH / 2);
+
+  // Center Section: Camera & Processing Diagnostics
+  ctx.textAlign = 'center';
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#94A3B8';
+  const fpsText = team1Hand.detectionFps ? `${team1Hand.detectionFps} FPS` : '60 FPS';
+  ctx.fillText(`CAM: 1280x720 • ${fpsText} • INPUT OK • [D]: TẮT DEBUG`, width / 2, barY + barH / 2);
+
+  // Right Section: Team 2 Status & Landmark Confidence
+  const t2Conf = Math.round((team2Hand.confidence ?? 0) * 100);
+  const t2ConfColor =
+    !team2Hand.detected ? '#94A3B8' : t2Conf >= 75 ? '#10B981' : t2Conf >= 45 ? '#F59E0B' : '#EF4444';
+  const t2Mode = team2Hand.trackingMode === 'touch' ? 'TOUCH' : 'CV 21-PTS';
+
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillStyle = t2ConfColor;
+  ctx.fillText(`${t2Conf}%`, barX + barW - 12, barY + barH / 2);
+
+  ctx.fillStyle = team2Hand.detected ? '#CBD5E1' : '#64748B';
+  ctx.font = '10px monospace';
+  ctx.fillText(team2Hand.detected ? `CONF:` : 'TÌM TAY...', barX + barW - 55, barY + barH / 2);
+
+  ctx.fillStyle = '#FB923C';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText(
+    `[T2 ${team2Name.toUpperCase()}] ${team2Hand.detected ? t2Mode : ''}`,
+    barX + barW - 95,
+    barY + barH / 2
+  );
+
+  // 2. DRAW HAND SKELETON & FLOATING CONFIDENCE HUD FOR EACH DETECTED HAND
+  drawSingleHandDebug(ctx, team1Hand, team1Name, '#38BDF8', width, height);
+  drawSingleHandDebug(ctx, team2Hand, team2Name, '#FB923C', width, height);
+
+  ctx.restore();
+}
+
+function drawSingleHandDebug(
+  ctx: CanvasRenderingContext2D,
+  hand: HandTrackResult,
+  teamName: string,
+  color: string,
+  width: number,
+  height: number
+) {
+  const normX = hand.x;
+  const normY = hand.y;
+  const hX = (normX / 100) * width;
+  const hY = (normY / 100) * height;
+
+  if (hand.detected) {
+    // 1. Draw Skeleton Bones if landmarks exist
+    if (hand.landmarks && hand.landmarks.length >= 6) {
+      const lms = hand.landmarks;
+      const pts = lms.map((lm) => ({
+        x: (lm.x / 100) * width,
+        y: (lm.y / 100) * height,
+      }));
+
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+      ctx.globalAlpha = 0.85;
+
+      // Full MediaPipe 21 landmarks skeleton
+      if (pts.length >= 21) {
+        const connections: [number, number][] = [
+          // Palm base & edges
+          [0, 1],
+          [1, 2],
+          [2, 3],
+          [3, 4], // Thumb
+          [0, 5],
+          [5, 6],
+          [6, 7],
+          [7, 8], // Index
+          [5, 9],
+          [9, 10],
+          [10, 11],
+          [11, 12], // Middle
+          [9, 13],
+          [13, 14],
+          [14, 15],
+          [15, 16], // Ring
+          [13, 17],
+          [0, 17],
+          [17, 18],
+          [18, 19],
+          [19, 20], // Pinky
+        ];
+
+        connections.forEach(([i, j]) => {
+          if (pts[i] && pts[j]) {
+            ctx.beginPath();
+            ctx.moveTo(pts[i].x, pts[i].y);
+            ctx.lineTo(pts[j].x, pts[j].y);
+            ctx.stroke();
+          }
+        });
+      } else {
+        // Star pattern from palm to 5 finger points for optical mode
+        const palm = pts[6] || pts[0];
+        for (let i = 0; i < Math.min(6, pts.length); i++) {
+          if (pts[i]) {
+            ctx.beginPath();
+            ctx.moveTo(palm.x, palm.y);
+            ctx.lineTo(pts[i].x, pts[i].y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Draw Joint Dots
+      pts.forEach((p, idx) => {
+        const isTip = idx === 4 || idx === 8 || idx === 12 || idx === 16 || idx === 20;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, isTip ? 5 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = isTip ? '#FFFFFF' : color;
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#000000';
+        ctx.stroke();
+      });
+
+      ctx.restore();
+    }
+
+    // 2. Floating Confidence HUD Card directly above hand
+    const cardW = 165;
+    const cardH = 56;
+    const cardX = Math.min(width - cardW - 12, Math.max(12, hX - cardW / 2));
+    const cardY = Math.max(54, hY - 80);
+
+    ctx.save();
+    // Card background
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+    drawRoundedBox(ctx, cardX, cardY, cardW, cardH, 8);
+    ctx.fill();
+
+    // Card border
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    drawRoundedBox(ctx, cardX, cardY, cardW, cardH, 8);
+    ctx.stroke();
+
+    // Line 1: Header / Team
+    const confVal = Math.round((hand.confidence ?? 0) * 100);
+    const confColor = confVal >= 75 ? '#10B981' : confVal >= 45 ? '#F59E0B' : '#EF4444';
+    const modeLabel = hand.trackingMode === 'touch' ? 'TOUCH' : 'CV 21-PTS';
+
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(`✋ ${teamName.toUpperCase()}`, cardX + 8, cardY + 15);
+
+    ctx.font = '9px monospace';
+    ctx.fillStyle = '#94A3B8';
+    ctx.textAlign = 'right';
+    ctx.fillText(modeLabel, cardX + cardW - 8, cardY + 15);
+
+    // Line 2: Landmark Confidence Score (Primary Metric)
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = '#F8FAFC';
+    ctx.textAlign = 'left';
+    ctx.fillText('Độ tin cậy:', cardX + 8, cardY + 32);
+
+    ctx.font = 'bold 12px monospace';
+    ctx.fillStyle = confColor;
+    ctx.textAlign = 'right';
+    ctx.fillText(`${confVal}%`, cardX + cardW - 8, cardY + 32);
+
+    // Line 3: Confidence Progress Bar
+    const barX = cardX + 8;
+    const barY = cardY + 40;
+    const barW = cardW - 16;
+    const barHeight = 5;
+
+    ctx.fillStyle = 'rgba(51, 65, 85, 0.8)';
+    drawRoundedBox(ctx, barX, barY, barW, barHeight, 3);
+    ctx.fill();
+
+    const fillW = Math.max(3, (barW * confVal) / 100);
+    ctx.fillStyle = confColor;
+    drawRoundedBox(ctx, barX, barY, fillW, barHeight, 3);
+    ctx.fill();
+
+    ctx.restore();
+  } else {
+    // Subtle zone search indicator
+    ctx.save();
+    const isTeam1 = teamName.toLowerCase().includes('xanh') || normX < 50;
+    const zoneX = isTeam1 ? width * 0.08 : width * 0.58;
+    const zoneY = height * 0.28;
+    const zoneW = width * 0.34;
+    const zoneH = height * 0.46;
+
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(zoneX, zoneY, zoneW, zoneH);
+
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
+    ctx.textAlign = 'center';
+    ctx.fillText(`🔍 Đang quét cử chỉ tay [${teamName}]`, zoneX + zoneW / 2, zoneY + zoneH / 2 - 8);
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = '#EF4444';
+    ctx.fillText(`Độ tin cậy: 0% (Chưa thấy tay)`, zoneX + zoneW / 2, zoneY + zoneH / 2 + 10);
+    ctx.restore();
+  }
 }

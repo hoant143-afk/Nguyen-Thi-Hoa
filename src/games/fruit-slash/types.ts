@@ -70,6 +70,13 @@ export interface HandPoint {
   time: number; // performance.now()
 }
 
+export interface HandLandmarkPoint {
+  x: number; // 0 to 100 (% of arena)
+  y: number; // 0 to 100 (% of arena)
+  z?: number;
+  visibility?: number;
+}
+
 export interface HandTrackResult {
   detected: boolean;
   x: number; // 0 to 100 (% arena)
@@ -82,6 +89,11 @@ export interface HandTrackResult {
   trail: HandPoint[];
   lastSlashTimestamp: number;
   rawPoint?: { x: number; y: number };
+  confidence?: number; // 0.00 to 1.00 landmark confidence score
+  trackingMode?: 'optical' | 'touch';
+  landmarks?: HandLandmarkPoint[];
+  handedness?: string;
+  detectionFps?: number;
 }
 
 export interface SlashParticle {
