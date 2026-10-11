@@ -28,6 +28,23 @@ export interface FirebaseValidationResult {
   };
 }
 
+const PLACEHOLDER_PREFIXES = [
+  'aizasyplaceholder',
+  'your_api_key',
+  'your_project_id',
+  'placeholder',
+  'undefined',
+  'null',
+];
+
+function isValueMissingOrPlaceholder(val: string | undefined): boolean {
+  if (!val) return true;
+  const cleaned = val.trim();
+  if (cleaned.length === 0) return true;
+  const lower = cleaned.toLowerCase();
+  return PLACEHOLDER_PREFIXES.some(prefix => lower.startsWith(prefix) || lower === prefix);
+}
+
 /**
  * Validates the presence of required Firebase environment variables.
  *
@@ -51,11 +68,11 @@ export function validateFirebaseConfig(): FirebaseValidationResult {
 
   const missingKeys: string[] = [];
 
-  if (!apiKey || apiKey.startsWith('AIzaSyPlaceholder')) missingKeys.push('VITE_FIREBASE_API_KEY');
-  if (!authDomain) missingKeys.push('VITE_FIREBASE_AUTH_DOMAIN');
-  if (!projectId) missingKeys.push('VITE_FIREBASE_PROJECT_ID');
-  if (!messagingSenderId) missingKeys.push('VITE_FIREBASE_MESSAGING_SENDER_ID');
-  if (!appId) missingKeys.push('VITE_FIREBASE_APP_ID');
+  if (isValueMissingOrPlaceholder(apiKey)) missingKeys.push('VITE_FIREBASE_API_KEY');
+  if (isValueMissingOrPlaceholder(authDomain)) missingKeys.push('VITE_FIREBASE_AUTH_DOMAIN');
+  if (isValueMissingOrPlaceholder(projectId)) missingKeys.push('VITE_FIREBASE_PROJECT_ID');
+  if (isValueMissingOrPlaceholder(messagingSenderId)) missingKeys.push('VITE_FIREBASE_MESSAGING_SENDER_ID');
+  if (isValueMissingOrPlaceholder(appId)) missingKeys.push('VITE_FIREBASE_APP_ID');
 
   return {
     isValid: missingKeys.length === 0,

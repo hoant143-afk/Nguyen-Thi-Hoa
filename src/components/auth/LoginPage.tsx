@@ -270,7 +270,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onExploreD
 
               <div className="pt-2 border-t border-amber-100 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[10px] text-slate-500">
-                  Hỗ trợ tối thiểu: <code>localhost</code>, domain Netlify production của EDUPLAY, và domain Preview.
+                  Hỗ trợ tối thiểu: <code>localhost</code>, domain Vercel production của EDUPLAY (ví dụ: <code>eduplay.vercel.app</code>) và domain Preview.
                 </p>
                 <button
                   type="button"
@@ -301,46 +301,107 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onExploreD
           </div>
         )}
 
-        {/* Missing Firebase configuration prompt (Requirement E) */}
+        {/* Missing Firebase configuration prompt with Production Diagnostics */}
         {!validation.isValid && (
-          <div className="w-full bg-amber-50/90 border-2 border-amber-300 rounded-2xl p-4 mb-6 text-left shadow-sm">
-            <div className="flex items-start gap-2.5 text-amber-900 mb-2">
-              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="w-full bg-amber-50/95 border-2 border-amber-400 rounded-3xl p-5 mb-6 text-left shadow-lg shadow-amber-500/10">
+            <div className="flex items-start gap-3 text-amber-950 mb-3">
+              <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
               <div className="flex-1">
-                <p className="font-bold text-sm text-amber-950">
+                <p className="font-black text-sm text-amber-950">
                   ⚠️ Firebase chưa được cấu hình đầy đủ.
                 </p>
-                <p className="text-xs text-amber-800 mt-0.5">
-                  Thiếu {validation.missingKeys.length} biến môi trường bắt buộc cho Google Authentication:
+                <p className="text-xs text-amber-900 mt-0.5 leading-relaxed">
+                  Trang web đang thiếu <strong>{validation.missingKeys.length}</strong> biến môi trường bắt buộc lúc build để khởi tạo Firebase:
                 </p>
               </div>
             </div>
 
-            <div className="bg-white/80 border border-amber-200/90 rounded-xl p-3 my-2 space-y-1">
-              <p className="text-[11px] font-bold uppercase text-amber-900 tracking-wider">Thiếu:</p>
-              <ul className="space-y-1 text-xs font-mono text-slate-800">
-                {validation.missingKeys.map((key) => (
-                  <li key={key} className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-                    <code className="bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 rounded font-bold">
-                      {key}
-                    </code>
-                  </li>
-                ))}
-              </ul>
+            {/* Diagnostic Box */}
+            <div className="bg-white/90 border border-amber-200 rounded-2xl p-3.5 my-3 space-y-2">
+              <div className="flex items-center justify-between pb-2 border-b border-amber-100 text-[11px]">
+                <span className="text-slate-500 font-semibold uppercase tracking-wider">Môi trường:</span>
+                <span className="font-mono font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                  {currentHostname.includes('vercel.app')
+                    ? 'VERCEL / PRODUCTION'
+                    : currentHostname.includes('run.app')
+                    ? 'AI STUDIO / PREVIEW'
+                    : 'PRODUCTION / BROWSER'}
+                </span>
+              </div>
+
+              <div className="space-y-1.5 text-xs font-mono">
+                <div className="flex items-center justify-between py-0.5">
+                  <span className="text-slate-700 font-semibold">VITE_FIREBASE_API_KEY:</span>
+                  <span className="font-bold flex items-center gap-1">
+                    {validation.config.apiKey && !validation.config.apiKey.startsWith('AIzaSyPlaceholder') ? (
+                      <span className="text-emerald-600">✅ Có sẵn</span>
+                    ) : (
+                      <span className="text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">❌ Thiếu</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between py-0.5">
+                  <span className="text-slate-700 font-semibold">VITE_FIREBASE_AUTH_DOMAIN:</span>
+                  <span className="font-bold flex items-center gap-1">
+                    {validation.config.authDomain ? (
+                      <span className="text-emerald-600">✅ Có sẵn</span>
+                    ) : (
+                      <span className="text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">❌ Thiếu</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between py-0.5">
+                  <span className="text-slate-700 font-semibold">VITE_FIREBASE_PROJECT_ID:</span>
+                  <span className="font-bold flex items-center gap-1">
+                    {validation.config.projectId ? (
+                      <span className="text-emerald-600">✅ Có sẵn</span>
+                    ) : (
+                      <span className="text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">❌ Thiếu</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between py-0.5">
+                  <span className="text-slate-700 font-semibold">VITE_FIREBASE_MESSAGING_SENDER_ID:</span>
+                  <span className="font-bold flex items-center gap-1">
+                    {validation.config.messagingSenderId ? (
+                      <span className="text-emerald-600">✅ Có sẵn</span>
+                    ) : (
+                      <span className="text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">❌ Thiếu</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between py-0.5">
+                  <span className="text-slate-700 font-semibold">VITE_FIREBASE_APP_ID:</span>
+                  <span className="font-bold flex items-center gap-1">
+                    {validation.config.appId ? (
+                      <span className="text-emerald-600">✅ Có sẵn</span>
+                    ) : (
+                      <span className="text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">❌ Thiếu</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between py-0.5 pt-1 border-t border-slate-100 text-[11px]">
+                  <span className="text-slate-500">VITE_FIREBASE_STORAGE_BUCKET:</span>
+                  <span className="text-slate-600 font-medium">
+                    {validation.config.storageBucket ? '✅ Có sẵn' : '⚪ OPTIONAL (Tùy chọn)'}
+                  </span>
+                </div>
+              </div>
             </div>
 
-            <div className="text-[11px] text-amber-900/90 space-y-1.5 pt-2 border-t border-amber-200">
-              <p>
-                • <strong>Môi trường phát triển:</strong> Thêm các biến trên vào file{' '}
-                <code className="bg-amber-100 text-amber-900 px-1 py-0.5 rounded font-mono font-bold">.env</code>.
+            {/* Build-time Notice */}
+            <div className="bg-amber-100/70 border border-amber-300/80 rounded-2xl p-3 text-[11px] text-amber-950 space-y-1.5 leading-relaxed">
+              <p className="font-bold flex items-center gap-1.5 text-amber-900">
+                <span>⚡ LƯU Ý QUAN TRỌNG KHI DEPLOY VERCEL:</span>
               </p>
               <p>
-                • <strong>Môi trường Netlify / Cloud:</strong> Cấu hình tại{' '}
-                <em>Site configuration → Environment variables</em>.
+                • Vite nhúng các biến <code>VITE_*</code> vào mã JavaScript tại <strong>BUILD TIME</strong> (khi chạy lệnh <code>npm run build</code>).
               </p>
-              <p className="text-emerald-800 font-medium">
-                • <em>Lưu ý:</em> Biến <code className="font-mono">VITE_FIREBASE_STORAGE_BUCKET</code> là tùy chọn (optional) và không chặn đăng nhập.
+              <p>
+                • Biến cấu hình trên Google AI Studio <strong>không tự động truyền sang Vercel</strong>. Bạn phải thêm riêng trên Vercel Dashboard.
+              </p>
+              <p className="font-bold text-rose-800 bg-rose-50/80 p-2 rounded-xl border border-rose-200">
+                🔄 “Environment Variables đã được cấu hình nhưng deployment hiện tại có thể được build trước khi các biến được thêm. Hãy vào Vercel Deployments → Redeploy.”
               </p>
             </div>
 
@@ -348,24 +409,43 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onExploreD
             <button
               type="button"
               onClick={() => setShowGuide(!showGuide)}
-              className="mt-3 w-full flex items-center justify-between text-xs font-bold text-amber-900 hover:text-amber-950 bg-amber-100/80 hover:bg-amber-200/80 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              className="mt-3 w-full flex items-center justify-between text-xs font-bold text-amber-950 hover:text-amber-900 bg-amber-200/60 hover:bg-amber-200/90 px-3.5 py-2 rounded-xl transition-colors cursor-pointer"
             >
-              <span>📋 Xem hướng dẫn 9 bước lấy mã từ Firebase Console</span>
+              <span>📋 Hướng dẫn thêm biến & Redeploy trên Vercel</span>
               {showGuide ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
 
             {showGuide && (
-              <div className="mt-2.5 p-3 bg-amber-100/60 rounded-xl text-[11px] text-amber-950 space-y-1.5 border border-amber-200 font-sans">
-                <ol className="list-decimal list-inside space-y-1">
-                  <li>Vào <strong>Firebase Console</strong> và chọn dự án của bạn</li>
-                  <li>Vào <strong>Project Settings</strong> (biểu tượng bánh răng)</li>
-                  <li>Mục <strong>General</strong> → cuộn xuống <strong>Your apps</strong></li>
-                  <li>Chọn <strong>Web App</strong> (biểu tượng &lt;/&gt;)</li>
-                  <li>Trong <strong>SDK setup and configuration</strong>, chọn <strong>Config</strong></li>
-                  <li>Copy 6 giá trị tương ứng trong <code>firebaseConfig</code></li>
-                  <li>Điền vào <strong>Environment Variables</strong> theo đúng tên tiền tố <code>VITE_FIREBASE_*</code></li>
-                  <li>Vào <strong>Authentication</strong> → <strong>Sign-in method</strong> → Bật <strong>Google</strong> (Enable)</li>
-                  <li>Vào <strong>Authentication</strong> → <strong>Settings</strong> → <strong>Authorized domains</strong> → Thêm domain <code>localhost</code> và domain Netlify của EDUPLAY</li>
+              <div className="mt-2.5 p-3.5 bg-white/95 rounded-2xl text-[11px] text-slate-700 space-y-2 border border-amber-200 font-sans">
+                <p className="font-bold text-amber-900 uppercase tracking-wide">
+                  Các bước thiết lập trên Vercel:
+                </p>
+                <ol className="list-decimal list-inside space-y-1.5 text-slate-700 leading-relaxed font-medium">
+                  <li>Mở <strong>Vercel</strong> → chọn đúng project <strong>EDUPLAY</strong> đang deploy.</li>
+                  <li>Vào <strong>Settings</strong> → mục <strong>Environment Variables</strong>.</li>
+                  <li>
+                    Thêm đủ 5 biến bắt buộc:
+                    <ul className="list-disc list-inside pl-4 pt-1 font-mono text-[10px] text-indigo-700 space-y-0.5">
+                      <li>VITE_FIREBASE_API_KEY</li>
+                      <li>VITE_FIREBASE_AUTH_DOMAIN</li>
+                      <li>VITE_FIREBASE_PROJECT_ID</li>
+                      <li>VITE_FIREBASE_MESSAGING_SENDER_ID</li>
+                      <li>VITE_FIREBASE_APP_ID</li>
+                      <li className="text-slate-500">VITE_FIREBASE_STORAGE_BUCKET (nếu có)</li>
+                    </ul>
+                  </li>
+                  <li>
+                    Đảm bảo bật checkbox scope cho cả <strong>Production</strong> và <strong>Preview</strong>.
+                  </li>
+                  <li>
+                    Lấy giá trị thật từ <strong>Firebase Console</strong> → <strong>Project Settings</strong> → <strong>General</strong> → <strong>Your apps (Web)</strong> → <strong>Config</strong> (tuyệt đối không copy placeholder).
+                  </li>
+                  <li>
+                    <strong>BẮT BUỘC REDEPLOY:</strong> Sau khi Save, vào tab <strong>Deployments</strong> → bấm menu 3 chấm ở deployment mới nhất → chọn <strong>Redeploy</strong> (hoặc git push commit mới).
+                  </li>
+                  <li>
+                    Thêm hostname Vercel (ví dụ: <code className="font-mono text-indigo-700">{currentHostname || 'eduplay.vercel.app'}</code>) vào <strong>Firebase Console → Authentication → Settings → Authorized domains</strong>.
+                  </li>
                 </ol>
               </div>
             )}
@@ -462,7 +542,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onExploreD
                 </button>
               </div>
               <p className="text-[10px] text-slate-500 leading-relaxed">
-                Khi triển khai lên <strong>localhost</strong>, <strong>Netlify</strong> (ví dụ: <code>eduplay.netlify.app</code>) hoặc <strong>Google AI Studio Preview</strong>, hãy thêm hostname tương ứng vào <strong>Firebase Console → Authentication → Settings → Authorized domains</strong>.
+                Khi triển khai lên <strong>localhost</strong>, <strong>Vercel</strong> (ví dụ: <code>eduplay.vercel.app</code>) hoặc <strong>Google AI Studio Preview</strong>, hãy thêm hostname tương ứng vào <strong>Firebase Console → Authentication → Settings → Authorized domains</strong>.
               </p>
             </div>
           )}

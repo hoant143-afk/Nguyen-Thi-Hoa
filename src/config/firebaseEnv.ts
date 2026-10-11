@@ -80,6 +80,23 @@ function maskValue(val: string): string {
   return `${val.slice(0, 4)}••••${val.slice(-4)}`;
 }
 
+const PLACEHOLDER_PREFIXES = [
+  'aizasyplaceholder',
+  'your_api_key',
+  'your_project_id',
+  'placeholder',
+  'undefined',
+  'null',
+];
+
+function isValueMissingOrPlaceholder(val: string | undefined): boolean {
+  if (!val) return true;
+  const cleaned = val.trim();
+  if (cleaned.length === 0) return true;
+  const lower = cleaned.toLowerCase();
+  return PLACEHOLDER_PREFIXES.some(prefix => lower.startsWith(prefix) || lower === prefix);
+}
+
 /**
  * Validates Firebase environment configuration without throwing an exception.
  * Allows the application to gracefully render a configuration checklist instead of crashing.
@@ -87,25 +104,22 @@ function maskValue(val: string): string {
 export function validateFirebaseEnvironment(): FirebaseEnvironmentValidation {
   const missing: string[] = [];
 
-  const isApiKeyValid = Boolean(
-    firebaseEnv.apiKey &&
-    !firebaseEnv.apiKey.startsWith('AIzaSyPlaceholder')
-  );
+  const isApiKeyValid = !isValueMissingOrPlaceholder(firebaseEnv.apiKey);
   if (!isApiKeyValid) missing.push('VITE_FIREBASE_API_KEY');
 
-  const isAuthDomainValid = Boolean(firebaseEnv.authDomain);
+  const isAuthDomainValid = !isValueMissingOrPlaceholder(firebaseEnv.authDomain);
   if (!isAuthDomainValid) missing.push('VITE_FIREBASE_AUTH_DOMAIN');
 
-  const isProjectIdValid = Boolean(firebaseEnv.projectId);
+  const isProjectIdValid = !isValueMissingOrPlaceholder(firebaseEnv.projectId);
   if (!isProjectIdValid) missing.push('VITE_FIREBASE_PROJECT_ID');
 
-  const isSenderIdValid = Boolean(firebaseEnv.messagingSenderId);
+  const isSenderIdValid = !isValueMissingOrPlaceholder(firebaseEnv.messagingSenderId);
   if (!isSenderIdValid) missing.push('VITE_FIREBASE_MESSAGING_SENDER_ID');
 
-  const isAppIdValid = Boolean(firebaseEnv.appId);
+  const isAppIdValid = !isValueMissingOrPlaceholder(firebaseEnv.appId);
   if (!isAppIdValid) missing.push('VITE_FIREBASE_APP_ID');
 
-  const isStorageBucketConfigured = Boolean(firebaseEnv.storageBucket);
+  const isStorageBucketConfigured = !isValueMissingOrPlaceholder(firebaseEnv.storageBucket);
 
   return {
     valid: missing.length === 0,
